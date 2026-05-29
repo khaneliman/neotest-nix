@@ -54,13 +54,41 @@ end
 
 ---@param file_path string
 ---@return boolean
+local function has_nix_unit_assertion(file_path)
+  local stat = vim.loop.fs_stat(file_path)
+  if stat == nil or stat.type ~= "file" then
+    return false
+  end
+
+  local file = io.open(file_path, "r")
+  if file == nil then
+    return false
+  end
+  local content = file:read("*a")
+  file:close()
+  if content == nil then
+    return false
+  end
+
+  return content:match("%f[%w]expr%f[%W]") ~= nil
+    and (
+      content:match("%f[%w]expected%f[%W]") ~= nil or content:match("%f[%w]expectedError%f[%W]") ~= nil
+    )
+end
+
+---@param file_path string
+---@return boolean
 function M.is_test_file(file_path)
   local filename = vim.fs.basename(file_path)
   if filename == "flake.nix" then
     return true
   end
 
-  return filename:match("%.nix$") ~= nil and filename:lower():match("test") ~= nil
+  if filename:match("%.nix$") == nil or filename:lower():match("test") == nil then
+    return false
+  end
+
+  return has_nix_unit_assertion(file_path)
 end
 
 ---@param name string
