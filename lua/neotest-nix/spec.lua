@@ -7,6 +7,7 @@ local M = {}
 ---@class neotest-nix.Position : neotest.Position
 ---@field attr_path? string
 ---@field runner? "nix"|"nix-unit"
+---@field nix_unit_kind? "flake"|"import"
 ---@field test_script_range? integer[]
 
 local nix_features = {
@@ -77,10 +78,14 @@ local function check_attr(tree)
 end
 
 ---@param attr string
+---@param kind "flake"|"import"
+---@param path string
 ---@return string
-local function nix_unit_expr(attr)
+local function nix_unit_expr(attr, kind, path)
   local name = attr:match("([^.]+)$") or "test"
-  return ("{ %s = (builtins.getFlake (toString ./. )).%s; }"):format(name, attr)
+  local root = kind == "import" and ("(import %s)"):format(path)
+    or "(builtins.getFlake (toString ./. ))"
+  return ("{ %s = %s.%s; }"):format(name, root, attr)
 end
 
 ---@param path string
@@ -116,12 +121,22 @@ function M.build_spec(args)
     vim.list_extend(command, nix_features)
     table.insert(command, "--keep-going")
   elseif position.runner == "nix-unit" then
+    if position.nix_unit_kind == nil then
+      vim.notify(
+        ("neotest-nix: nix-unit tests in %s are not reachable from the flake root; run their wrapping check instead (e.g. nix build .#checks.<system>.<name>)"):format(
+          position.path
+        ),
+        vim.log.levels.WARN
+      )
+      return nil
+    end
+
     command = {
       "nix-unit",
     }
     vim.list_extend(command, nix_unit_features)
     table.insert(command, "--expr")
-    table.insert(command, nix_unit_expr(attr))
+    table.insert(command, nix_unit_expr(attr, position.nix_unit_kind, position.path))
   else
     command = {
       "nix",

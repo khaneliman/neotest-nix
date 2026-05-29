@@ -148,6 +148,46 @@ local function is_nix_unit_value(binding, source)
   return has_expr and has_expected
 end
 
+---Classify how a nix-unit suite can be evaluated for a run.
+---  "flake"  -> reachable as a flake output (file is flake.nix)
+---  "import" -> file's top-level expression is an attrset and the suite is
+---              reached by plain attr indexing, so `import ./file` works
+---  nil      -> wrapped in a function/let; not individually runnable
+---@param binding userdata
+---@param file_path string
+---@return "flake"|"import"|nil
+local function nix_unit_kind(binding, file_path)
+  if vim.fs.basename(file_path) == "flake.nix" then
+    return "flake"
+  end
+
+  local blocked = false
+  local top = binding
+  local current = binding
+  while current ~= nil do
+    local kind = current:type()
+    if kind == "let_expression" or kind == "function_expression" then
+      blocked = true
+    end
+
+    local parent = current:parent()
+    if parent == nil or parent:type() == "source_code" then
+      top = current
+      break
+    end
+    current = parent
+  end
+
+  if not blocked then
+    local top_type = top:type()
+    if top_type == "attrset_expression" or top_type == "rec_attrset_expression" then
+      return "import"
+    end
+  end
+
+  return nil
+end
+
 ---@param binding userdata
 ---@param source string
 ---@return boolean
@@ -277,6 +317,8 @@ function M._build_position(file_path, source, captured_nodes)
 
   if is_check then
     position.test_script_range = test_script_range(binding, source)
+  elseif is_nix_unit then
+    position.nix_unit_kind = nix_unit_kind(binding, file_path)
   end
 
   return position
