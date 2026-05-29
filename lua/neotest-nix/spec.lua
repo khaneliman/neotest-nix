@@ -1,4 +1,5 @@
 local discover = require("neotest-nix.discover")
+local process = require("neotest-nix.process")
 local results = require("neotest-nix.results")
 
 local M = {}
@@ -134,6 +135,7 @@ function M.build_spec(args)
   local run_spec = {
     command = with_extra_args(command, args.extra_args),
     cwd = cwd,
+    strategy = process.strategy,
     context = {
       attr = attr,
       path = position.path,
