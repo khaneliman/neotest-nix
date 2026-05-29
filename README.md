@@ -14,6 +14,12 @@ It discovers two kinds of tests in a flake-based project and runs them in place:
 - **nix-unit tests** — attribute sets shaped `{ expr = ...; expected = ...; }`
   (or `expectedError`). Run with [`nix-unit`](https://github.com/nix-community/nix-unit).
 
+## Demo
+
+![neotest-nix running flake checks and nix-unit tests from Neovim](./assets/demo.gif)
+
+<!-- Regenerate with: nix run nixpkgs#vhs -- demo.tape -->
+
 ## Features
 
 - Discovers flake `checks` and `nix-unit` suites straight from tree-sitter, so
