@@ -221,9 +221,9 @@ local function find_descendant(node, callback)
   end
 
   for child in node:iter_children() do
-    found = find_descendant(child, callback)
-    if found ~= nil then
-      return found
+    local descendant = find_descendant(child, callback)
+    if descendant ~= nil then
+      return descendant
     end
   end
 
@@ -274,6 +274,9 @@ function M._build_position(file_path, source, captured_nodes)
 
     if is_outputs or is_checks or is_tests or is_system then
       local definition = captured_nodes["namespace.definition"]
+      -- neotest assigns `id` after build_position returns, so the partial
+      -- position legitimately omits it.
+      ---@diagnostic disable-next-line: return-type-mismatch
       return {
         type = "namespace",
         path = file_path,
@@ -321,6 +324,7 @@ function M._build_position(file_path, source, captured_nodes)
     position.nix_unit_kind = nix_unit_kind(binding, file_path)
   end
 
+  ---@diagnostic disable-next-line: return-type-mismatch
   return position
 end
 
@@ -502,6 +506,7 @@ function M.setup(opts)
     build_spec = spec.build_spec,
     results = results.results,
 
+    ---@async
     ---@param file_path string
     discover_positions = function(file_path)
       parser.ensure_nix_parser(opts.parser_runtime_paths)
