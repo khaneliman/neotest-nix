@@ -106,6 +106,35 @@ local function vm_tree(root)
   })
 end
 
+local function multi_vm_tree(root)
+  local file_path = vim.fs.joinpath(root, "flake.nix")
+  return Tree:new({
+    id = file_path,
+    name = "flake.nix",
+    path = file_path,
+    type = "file",
+  }, {
+    Tree:new({
+      attr_path = "checks.aarch64-linux.vmA",
+      id = "vmA",
+      name = "vmA",
+      path = file_path,
+      range = { 0, 0, 8, 0 },
+      test_script_range = { 4, 19, 7, 6 },
+      type = "test",
+    }),
+    Tree:new({
+      attr_path = "checks.aarch64-linux.vmB",
+      id = "vmB",
+      name = "vmB",
+      path = file_path,
+      range = { 10, 0, 18, 0 },
+      test_script_range = { 14, 19, 17, 6 },
+      type = "test",
+    }),
+  })
+end
+
 local function output_file(lines)
   local path = vim.fn.tempname()
   vim.fn.writefile(lines, path)
@@ -228,6 +257,42 @@ describe("results", function()
       column = 0,
       severity = vim.diagnostic.severity.ERROR,
     }, parsed.vm.errors[1])
+  end)
+
+  it("attributes a VM traceback only to the targeted test", function()
+    local root = project()
+    local position_tree = multi_vm_tree(root)
+    local parsed = results.results(run_spec(root, { pos_id = "vmB" }), {
+      code = 1,
+      output = output_file({
+        "Traceback (most recent call last):",
+        '  File "/nix/store/hash-source/test-script.py", line 2, in <module>',
+        '    machine.succeed("false")',
+        "AssertionError: command failed",
+      }),
+    }, position_tree)
+
+    assert.is_nil(parsed.vmA)
+    assert.are.equal("failed", parsed.vmB.status)
+    assert.are.equal("AssertionError: command failed", parsed.vmB.errors[1].message)
+  end)
+
+  it("does not blame every VM test for an unattributable traceback", function()
+    local root = project()
+    local position_tree = multi_vm_tree(root)
+    local parsed = results.results(run_spec(root), {
+      code = 1,
+      output = output_file({
+        "Traceback (most recent call last):",
+        '  File "/nix/store/hash-source/test-script.py", line 2, in <module>',
+        '    machine.succeed("false")',
+        "AssertionError: command failed",
+      }),
+    }, position_tree)
+
+    assert.is_nil(parsed.vmA)
+    assert.is_nil(parsed.vmB)
+    assert.are.equal("failed", parsed[position_tree:data().id].status)
   end)
 
   it("streams Nix diagnostics as soon as source locations are available", function()
