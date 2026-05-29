@@ -1,4 +1,5 @@
 local discover = require("neotest-nix.discover")
+local results = require("neotest-nix.results")
 
 local M = {}
 
@@ -130,7 +131,7 @@ function M.build_spec(args)
     table.insert(command, ".#" .. attr)
   end
 
-  return {
+  local run_spec = {
     command = with_extra_args(command, args.extra_args),
     cwd = cwd,
     context = {
@@ -141,6 +142,9 @@ function M.build_spec(args)
       type = position.type,
     },
   }
+  run_spec.stream = results.stream(run_spec, tree)
+
+  return run_spec
 end
 
 return M

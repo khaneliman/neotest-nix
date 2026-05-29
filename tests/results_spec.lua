@@ -229,4 +229,66 @@ describe("results", function()
       severity = vim.diagnostic.severity.ERROR,
     }, parsed.vm.errors[1])
   end)
+
+  it("streams Nix diagnostics as soon as source locations are available", function()
+    local root = project()
+    local position_tree = tree(root)
+    local lines = {
+      "error: assertion failed",
+      "       at /nix/store/abc123-source/checks/unit.nix:2:3:",
+    }
+    local index = 0
+    local stream = results.stream(run_spec(root), position_tree)(function()
+      index = index + 1
+      return lines[index]
+    end)
+
+    local parsed = stream()
+
+    if parsed == nil or parsed.unit == nil or parsed.unit.errors == nil then
+      error("missing streamed unit result")
+    end
+
+    local unit = parsed.unit
+    assert.are.equal("failed", unit.status)
+    assert.are.same({
+      message = "assertion failed",
+      line = 1,
+      column = 2,
+      severity = vim.diagnostic.severity.ERROR,
+    }, unit.errors[1])
+    assert.is_nil(stream())
+  end)
+
+  it("streams VM traceback diagnostics as soon as tracebacks are available", function()
+    local root = project()
+    local position_tree = vm_tree(root)
+    local lines = {
+      "Traceback (most recent call last):",
+      '  File "/nix/store/hash-source/test-script.py", line 2, in <module>',
+      '    machine.succeed("false")',
+      "AssertionError: command failed",
+    }
+    local index = 0
+    local stream = results.stream(run_spec(root), position_tree)(function()
+      index = index + 1
+      return lines[index]
+    end)
+
+    local parsed = stream()
+
+    if parsed == nil or parsed.vm == nil or parsed.vm.errors == nil then
+      error("missing streamed vm result")
+    end
+
+    local vm_result = parsed.vm
+    assert.are.equal("failed", vm_result.status)
+    assert.are.same({
+      message = "AssertionError: command failed",
+      line = 6,
+      column = 0,
+      severity = vim.diagnostic.severity.ERROR,
+    }, vm_result.errors[1])
+    assert.is_nil(stream())
+  end)
 end)
