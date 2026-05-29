@@ -116,6 +116,41 @@ end
 ---@param binding userdata
 ---@param source string
 ---@return boolean
+local function is_nix_unit_value(binding, source)
+  local expression = binding_expression(binding)
+  if expression == nil or expression:type() ~= "attrset_expression" then
+    return false
+  end
+
+  local has_expr = false
+  local has_expected = false
+
+  -- tree-sitter-nix wraps an attrset's bindings in a binding_set node, so
+  -- the bindings are not direct children of the attrset_expression.
+  local function inspect(node)
+    for child in node:iter_children() do
+      local kind = child:type()
+      if kind == "binding" then
+        local parts = binding_attrpath_parts(child, source)
+        if parts[1] == "expr" then
+          has_expr = true
+        elseif parts[1] == "expected" or parts[1] == "expectedError" then
+          has_expected = true
+        end
+      elseif kind == "binding_set" then
+        inspect(child)
+      end
+    end
+  end
+
+  inspect(expression)
+
+  return has_expr and has_expected
+end
+
+---@param binding userdata
+---@param source string
+---@return boolean
 local function has_checks_ancestor(binding, source)
   local current = binding:parent()
 
@@ -225,7 +260,7 @@ function M._build_position(file_path, source, captured_nodes)
 
   local parts = full_attrpath_parts(binding, source)
   local is_check = is_dotted_check(parts)
-  local is_nix_unit = is_nix_unit_test(parts)
+  local is_nix_unit = is_nix_unit_test(parts) and is_nix_unit_value(binding, source)
   if not is_check and not is_nix_unit then
     return nil
   end
