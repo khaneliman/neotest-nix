@@ -41,5 +41,13 @@
           };
         };
       };
+
+      # False positives: names start with "test" but values are not
+      # nix-unit assertions. None of these should be discovered as tests.
+      testFunction = system: system;
+      testDerivation = nixpkgs.legacyPackages.x86_64-linux.hello;
+      testMissingExpected = {
+        expr = 1;
+      };
     };
 }

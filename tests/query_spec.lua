@@ -76,6 +76,16 @@ describe("nix query", function()
     error("missing testLibrary position")
   end)
 
+  it("ignores test-prefixed attrs that are not nix-unit assertions", function()
+    local positions = parse_fixture()
+
+    for _, position in ipairs(positions) do
+      assert.is_not.equal("testFunction", position.name)
+      assert.is_not.equal("testDerivation", position.name)
+      assert.is_not.equal("testMissingExpected", position.name)
+    end
+  end)
+
   it("captures NixOS VM testScript ranges", function()
     local positions = parse_fixture()
 
