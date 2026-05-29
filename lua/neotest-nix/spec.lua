@@ -2,9 +2,18 @@ local discover = require("neotest-nix.discover")
 
 local M = {}
 
+---@class neotest-nix.Position : neotest.Position
+---@field attr_path? string
+---@field runner? "nix"|"nix-unit"
+
 local nix_features = {
   "--extra-experimental-features",
   "nix-command flakes",
+}
+
+local nix_unit_features = {
+  "--extra-experimental-features",
+  "flakes",
 }
 
 ---@param command string[]
@@ -36,14 +45,20 @@ end
 ---@param tree neotest.Tree
 ---@return string?
 local function check_attr(tree)
+  local position = tree:data()
+  ---@cast position neotest-nix.Position
+  if position.attr_path ~= nil then
+    return position.attr_path
+  end
+
   local system
   local test
 
-  for _, position in ipairs(position_path(tree)) do
-    if position.type == "namespace" and position.name:match("^[a-z0-9_]+%-[a-z0-9_]+$") then
-      system = position.name
-    elseif position.type == "test" then
-      test = position.name
+  for _, ancestor in ipairs(position_path(tree)) do
+    if ancestor.type == "namespace" and ancestor.name:match("^[a-z0-9_]+%-[a-z0-9_]+$") then
+      system = ancestor.name
+    elseif ancestor.type == "test" then
+      test = ancestor.name
     end
   end
 
@@ -56,6 +71,13 @@ local function check_attr(tree)
   end
 
   return ("checks.%s.%s"):format(system, test)
+end
+
+---@param attr string
+---@return string
+local function nix_unit_expr(attr)
+  local name = attr:match("([^.]+)$") or "test"
+  return ("{ %s = (builtins.getFlake (toString ./. )).%s; }"):format(name, attr)
 end
 
 ---@param path string
@@ -73,6 +95,7 @@ function M.build_spec(args)
   end
 
   local position = tree:data()
+  ---@cast position neotest-nix.Position
   if position.type == "dir" then
     return nil
   end
@@ -89,6 +112,13 @@ function M.build_spec(args)
     }
     vim.list_extend(command, nix_features)
     table.insert(command, "--keep-going")
+  elseif position.runner == "nix-unit" then
+    command = {
+      "nix-unit",
+    }
+    vim.list_extend(command, nix_unit_features)
+    table.insert(command, "--expr")
+    table.insert(command, nix_unit_expr(attr))
   else
     command = {
       "nix",
@@ -106,6 +136,7 @@ function M.build_spec(args)
       attr = attr,
       path = position.path,
       pos_id = position.id,
+      runner = position.runner or "nix",
       type = position.type,
     },
   }

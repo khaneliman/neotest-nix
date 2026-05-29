@@ -39,9 +39,23 @@ describe("nix query", function()
     local positions = parse_fixture()
 
     assert.same(
-      { "aarch64-darwin", "checks", "outputs", "x86_64-linux" },
+      { "aarch64-darwin", "checks", "outputs", "tests", "x86_64-linux" },
       names_by_type(positions, "namespace")
     )
-    assert.same({ "integration", "unit" }, names_by_type(positions, "test"))
+    assert.same({ "integration", "testPass", "unit" }, names_by_type(positions, "test"))
+  end)
+
+  it("marks nix-unit test output positions with runner metadata", function()
+    local positions = parse_fixture()
+
+    for _, position in ipairs(positions) do
+      if position.name == "testPass" then
+        assert.are.equal("nix-unit", position.runner)
+        assert.are.equal("tests.testPass", position.attr_path)
+        return
+      end
+    end
+
+    error("missing testPass position")
   end)
 end)

@@ -29,6 +29,7 @@
             lua51Packages.vusted
             lua-language-server
             nil
+            nix-unit
             nixfmt
           ]);
       };

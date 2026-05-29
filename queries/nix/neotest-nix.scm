@@ -1,5 +1,6 @@
 ; Capture flake output checks as a nested Neotest tree:
 ; outputs -> checks -> system -> derivation/test attribute.
+; Also capture flake-level nix-unit tests under outputs.tests.
 
 (binding
   attrpath: (attrpath
@@ -12,6 +13,12 @@
     (identifier) @namespace.name)
   expression: (_) @namespace.definition
   (#eq? @namespace.name "checks"))
+
+(binding
+  attrpath: (attrpath
+    (identifier) @namespace.name)
+  expression: (_) @namespace.definition
+  (#eq? @namespace.name "tests"))
 
 (binding
   attrpath: (attrpath

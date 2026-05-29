@@ -8,6 +8,7 @@ local spec = require("neotest-nix.spec")
 local M = {}
 
 local system_pattern = "^[a-z0-9_]+-[a-z0-9_]+$"
+local nix_unit_test_pattern = "^test"
 
 ---@return string
 local function load_query()
@@ -56,10 +57,50 @@ local function binding_attrpath(binding)
   return attrpaths and attrpaths[1] or nil
 end
 
+---@param binding userdata
+---@param source string
+---@return string[]
+local function binding_attrpath_parts(binding, source)
+  local attrpath = binding_attrpath(binding)
+  return attrpath ~= nil and attrpath_parts(attrpath, source) or {}
+end
+
+---@param binding userdata
+---@param source string
+---@return string[]
+local function full_attrpath_parts(binding, source)
+  local attrpaths = {}
+  local current = binding
+
+  while current ~= nil do
+    if current:type() == "binding" then
+      local parts = binding_attrpath_parts(current, source)
+      if parts[1] ~= nil and parts[1] ~= "outputs" then
+        table.insert(attrpaths, 1, parts)
+      end
+    end
+
+    current = current:parent()
+  end
+
+  local full_parts = {}
+  for _, parts in ipairs(attrpaths) do
+    vim.list_extend(full_parts, parts)
+  end
+
+  return full_parts
+end
+
 ---@param parts string[]
 ---@return boolean
 local function is_dotted_check(parts)
   return #parts >= 3 and parts[1] == "checks" and parts[2]:match(system_pattern) ~= nil
+end
+
+---@param parts string[]
+---@return boolean
+local function is_nix_unit_test(parts)
+  return #parts >= 2 and parts[1] == "tests" and parts[#parts]:match(nix_unit_test_pattern) ~= nil
 end
 
 ---@param binding userdata
@@ -122,15 +163,15 @@ function M._build_position(file_path, source, captured_nodes)
   if namespace_name ~= nil then
     local name = vim.treesitter.get_node_text(namespace_name, source)
     local binding = containing_binding(namespace_name)
-    local attrpath = binding ~= nil and binding_attrpath(binding) or nil
-    local parts = attrpath ~= nil and attrpath_parts(attrpath, source) or {}
+    local parts = binding ~= nil and binding_attrpath_parts(binding, source) or {}
     local is_outputs = name == "outputs" and parts[1] == "outputs"
     local is_checks = name == "checks" and parts[1] == "checks" and #parts == 1
+    local is_tests = name == "tests" and parts[1] == "tests" and #parts == 1
     local is_system = name:match(system_pattern) ~= nil
       and binding ~= nil
       and has_checks_ancestor(binding, source)
 
-    if is_outputs or is_checks or is_system then
+    if is_outputs or is_checks or is_tests or is_system then
       local definition = captured_nodes["namespace.definition"]
       return {
         type = "namespace",
@@ -156,16 +197,20 @@ function M._build_position(file_path, source, captured_nodes)
     return nil
   end
 
-  local parts = attrpath_parts(attrpath, source)
-  if not is_dotted_check(parts) and not has_check_system_ancestors(binding, source) then
+  local parts = full_attrpath_parts(binding, source)
+  local is_check = is_dotted_check(parts) or has_check_system_ancestors(binding, source)
+  local is_nix_unit = is_nix_unit_test(parts)
+  if not is_check and not is_nix_unit then
     return nil
   end
 
   local definition = captured_nodes["test.definition"]
   return {
+    attr_path = table.concat(parts, "."),
     type = "test",
     path = file_path,
     name = parts[#parts],
+    runner = is_nix_unit and "nix-unit" or "nix",
     range = { definition:range() },
   }
 end
