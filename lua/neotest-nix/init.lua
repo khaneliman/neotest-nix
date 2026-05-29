@@ -7,7 +7,7 @@ local spec = require("neotest-nix.spec")
 
 local M = {}
 
-local system_pattern = "^[a-z0-9_]+-[a-z0-9_]+$"
+local system_pattern = spec.system_pattern
 local nix_unit_test_pattern = "^test"
 
 ---@return string

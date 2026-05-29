@@ -6,6 +6,12 @@ local M = {}
 
 local uv = vim.uv or vim.loop
 
+-- Matches a Nix system tuple (e.g. "x86_64-linux") as an attribute name.
+-- Shared with the position parser so discovery and run-spec agree on what
+-- counts as a per-system namespace. The tree-sitter query keeps its own copy
+-- because query predicates cannot reference Lua values.
+M.system_pattern = "^[a-z0-9_]+%-[a-z0-9_]+$"
+
 ---@class neotest-nix.Position : neotest.Position
 ---@field attr_path? string
 ---@field runner? "nix"|"nix-unit"
@@ -61,7 +67,7 @@ local function check_attr(tree)
   local test
 
   for _, ancestor in ipairs(position_path(tree)) do
-    if ancestor.type == "namespace" and ancestor.name:match("^[a-z0-9_]+%-[a-z0-9_]+$") then
+    if ancestor.type == "namespace" and ancestor.name:match(M.system_pattern) then
       system = ancestor.name
     elseif ancestor.type == "test" then
       test = ancestor.name
