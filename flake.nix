@@ -24,8 +24,8 @@
             src = self;
             dependencies = with prev.vimPlugins; [
               neotest
+              nvim-treesitter.grammarPlugins.nix
               nvim-nio
-              plenary-nvim
             ];
             doCheck = false;
           };
