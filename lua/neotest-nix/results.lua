@@ -30,7 +30,10 @@ local function error_message(output)
   for line in output:gmatch("[^\r\n]+") do
     local parsed = line:match("^%s*error:%s*(.+)$")
     if parsed ~= nil and parsed ~= "" then
+      -- The first `error:` line is the underlying cause; later lines are
+      -- usually the generic "build of '...' failed" wrapper.
       message = parsed
+      break
     end
   end
 
