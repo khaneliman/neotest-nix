@@ -5,7 +5,13 @@
       "release-type": "simple",
       "include-component-in-tag": false,
       "bump-minor-pre-major": true,
-      "bump-patch-for-minor-pre-major": true
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "flake.nix"
+        }
+      ]
     }
   }
 }
