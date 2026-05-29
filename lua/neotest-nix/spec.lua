@@ -131,9 +131,10 @@ function M.build_spec(args)
   elseif position.runner == "nix-unit" then
     if position.nix_unit_kind == nil then
       vim.notify(
-        ("neotest-nix: nix-unit tests in %s are not reachable from the flake root; run their wrapping check instead (e.g. nix build .#checks.<system>.<name>)"):format(
-          position.path
-        ),
+        (
+          "neotest-nix: nix-unit tests in %s are not reachable from the flake root; "
+          .. "run their wrapping check instead (e.g. nix build .#checks.<system>.<name>)"
+        ):format(position.path),
         vim.log.levels.WARN
       )
       return nil

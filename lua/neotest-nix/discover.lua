@@ -74,7 +74,8 @@ local function has_nix_unit_assertion(file_path)
 
   return content:match("%f[%w]expr%f[%W]") ~= nil
     and (
-      content:match("%f[%w]expected%f[%W]") ~= nil or content:match("%f[%w]expectedError%f[%W]") ~= nil
+      content:match("%f[%w]expected%f[%W]") ~= nil
+      or content:match("%f[%w]expectedError%f[%W]") ~= nil
     )
 end
 
