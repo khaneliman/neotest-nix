@@ -96,12 +96,13 @@ describe("spec", function()
     assert.are.equal("checks.aarch64-darwin.unit", run.context.attr)
   end)
 
-  it("builds a targeted nix-unit expression for nix-unit tests", function()
+  it("builds a targeted nix-unit expression for flake nix-unit tests", function()
     local root = project()
     local test = node({
       attr_path = "tests.testPass",
       id = "testPass",
       name = "testPass",
+      nix_unit_kind = "flake",
       path = vim.fs.joinpath(root, "flake.nix"),
       runner = "nix-unit",
       type = "test",
@@ -119,6 +120,62 @@ describe("spec", function()
     assert.are.equal(root, run.cwd)
     assert.are.equal("tests.testPass", run.context.attr)
     assert.are.equal("nix-unit", run.context.runner)
+  end)
+
+  it("builds an import expression for bare-attrset nix-unit files", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "tests.nix")
+    local test = node({
+      attr_path = "nested.testNested",
+      id = "testNested",
+      name = "testNested",
+      nix_unit_kind = "import",
+      path = path,
+      runner = "nix-unit",
+      type = "test",
+    })
+
+    local run = build_spec({ tree = test })
+
+    assert.same({
+      "nix-unit",
+      "--extra-experimental-features",
+      "flakes",
+      "--expr",
+      ("{ testNested = (import %s).nested.testNested; }"):format(path),
+    }, run.command)
+    assert.are.equal("nested.testNested", run.context.attr)
+  end)
+
+  it("skips unreachable nix-unit tests with a warning", function()
+    local root = project()
+    local notify = vim.notify
+    local notified = false
+    vim.notify = function()
+      notified = true
+    end
+
+    local ok, run = pcall(function()
+      ---@type any
+      local run_args = {
+        tree = node({
+          attr_path = "results.testWrapped",
+          id = "testWrapped",
+          name = "testWrapped",
+          nix_unit_kind = nil,
+          path = vim.fs.joinpath(root, "lib-tests.nix"),
+          runner = "nix-unit",
+          type = "test",
+        }),
+      }
+      return spec.build_spec(run_args)
+    end)
+
+    vim.notify = notify
+
+    assert.is_true(ok)
+    assert.is_nil(run)
+    assert.is_true(notified)
   end)
 
   it("does not build specs for directory positions", function()

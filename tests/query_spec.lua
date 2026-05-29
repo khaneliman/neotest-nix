@@ -1,6 +1,6 @@
-local function parse_fixture()
+local function parse_file(fixture, file_path)
   local query = table.concat(vim.fn.readfile("queries/nix/neotest-nix.scm"), "\n")
-  local source = table.concat(vim.fn.readfile("tests/fixtures/flake.nix"), "\n")
+  local source = table.concat(vim.fn.readfile(fixture), "\n")
   local parsed_query = vim.treesitter.query.parse("nix", query)
   local root = vim.treesitter.get_string_parser(source, "nix"):parse()[1]:root()
   local positions = {}
@@ -12,13 +12,25 @@ local function parse_fixture()
       captured_nodes[capture] = type(nodes) == "table" and nodes[#nodes] or nodes
     end
 
-    local position = require("neotest-nix")._build_position("flake.nix", source, captured_nodes)
+    local position = require("neotest-nix")._build_position(file_path, source, captured_nodes)
     if position ~= nil then
       table.insert(positions, position)
     end
   end
 
   return positions
+end
+
+local function parse_fixture()
+  return parse_file("tests/fixtures/flake.nix", "flake.nix")
+end
+
+local function find_position(positions, name)
+  for _, position in ipairs(positions) do
+    if position.name == name then
+      return position
+    end
+  end
 end
 
 local function names_by_type(positions, node_type)
@@ -74,6 +86,26 @@ describe("nix query", function()
     end
 
     error("missing testLibrary position")
+  end)
+
+  it("marks flake.nix nix-unit suites as flake-reachable", function()
+    local positions = parse_fixture()
+
+    assert.are.equal("flake", find_position(positions, "testPass").nix_unit_kind)
+    assert.are.equal("flake", find_position(positions, "testLibrary").nix_unit_kind)
+  end)
+
+  it("marks bare-attrset nix-unit files as import-reachable", function()
+    local positions = parse_file("tests/fixtures/bare-tests.nix", "bare-tests.nix")
+
+    local bare = find_position(positions, "testBare")
+    assert.are.equal("nix-unit", bare.runner)
+    assert.are.equal("import", bare.nix_unit_kind)
+    assert.are.equal("testBare", bare.attr_path)
+
+    local nested = find_position(positions, "testNested")
+    assert.are.equal("import", nested.nix_unit_kind)
+    assert.are.equal("nested.testNested", nested.attr_path)
   end)
 
   it("ignores test-prefixed attrs that are not nix-unit assertions", function()
