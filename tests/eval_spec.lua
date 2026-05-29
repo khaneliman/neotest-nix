@@ -43,11 +43,15 @@ local function tests_by_attr(tree)
   return found
 end
 
-describe("eval check merge", function()
+local function checks(names)
+  return { { attr = "checks", names = names } }
+end
+
+describe("eval output merge", function()
   local adapter = require("neotest-nix")
 
   it("adds generated checks as runnable test positions", function()
-    local merged = adapter._merge_eval_checks(file_tree(), "x86_64-linux", { "parseLix", "treefmt" })
+    local merged = adapter._merge_eval_outputs(file_tree(), "x86_64-linux", checks({ "parseLix", "treefmt" }))
     local tests = tests_by_attr(merged)
 
     local parse = tests["checks.x86_64-linux.parseLix"]
@@ -61,7 +65,7 @@ describe("eval check merge", function()
   end)
 
   it("nests generated checks under checks -> system namespaces", function()
-    local merged = adapter._merge_eval_checks(file_tree(), "x86_64-linux", { "parseLix" })
+    local merged = adapter._merge_eval_outputs(file_tree(), "x86_64-linux", checks({ "parseLix" }))
 
     local namespaces = {}
     for _, position in merged:iter() do
@@ -74,8 +78,30 @@ describe("eval check merge", function()
     assert.is_true(namespaces["x86_64-linux"])
   end)
 
-  it("does not duplicate checks already present in source", function()
-    local merged = adapter._merge_eval_checks(tree_with_literal_check(), "x86_64-linux", { "unit", "extra" })
+  it("merges multiple outputs under their own namespaces", function()
+    local merged = adapter._merge_eval_outputs(file_tree(), "x86_64-linux", {
+      { attr = "checks", names = { "treefmt" } },
+      { attr = "legacyPackages", names = { "test-zsh-plugins", "test-bash" } },
+    })
+
+    local namespaces = {}
+    for _, position in merged:iter() do
+      if position.type == "namespace" then
+        namespaces[position.name] = true
+      end
+    end
+    assert.is_true(namespaces["checks"])
+    assert.is_true(namespaces["legacyPackages"])
+
+    local tests = tests_by_attr(merged)
+    assert.is_not_nil(tests["checks.x86_64-linux.treefmt"])
+    local pkg = tests["legacyPackages.x86_64-linux.test-zsh-plugins"]
+    assert.is_not_nil(pkg)
+    assert.are.equal("nix", pkg.runner)
+  end)
+
+  it("does not duplicate outputs already present in source", function()
+    local merged = adapter._merge_eval_outputs(tree_with_literal_check(), "x86_64-linux", checks({ "unit", "extra" }))
 
     local count = 0
     for _, position in merged:iter() do
@@ -91,7 +117,7 @@ describe("eval check merge", function()
 
   it("returns the original tree when nothing new is discovered", function()
     local base = tree_with_literal_check()
-    local merged = adapter._merge_eval_checks(base, "x86_64-linux", { "unit" })
+    local merged = adapter._merge_eval_outputs(base, "x86_64-linux", checks({ "unit" }))
 
     assert.are.equal(base, merged)
   end)
