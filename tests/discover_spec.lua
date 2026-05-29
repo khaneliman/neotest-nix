@@ -26,12 +26,24 @@ describe("discover", function()
     assert.are.equal(project, discover.root(vim.fs.joinpath(nested, "example_test.nix")))
   end)
 
-  it("matches flake and nix test files", function()
-    assert.is_true(discover.is_test_file("/workspace/flake.nix"))
-    assert.is_true(discover.is_test_file("/workspace/foo_test.nix"))
-    assert.is_true(discover.is_test_file("/workspace/foo_test_bar.nix"))
-    assert.is_true(discover.is_test_file("/workspace/FooTest.nix"))
-    assert.is_false(discover.is_test_file("/workspace/default.nix"))
+  it("matches flake and nix-unit test files", function()
+    local nix_unit = { "{", "  testFoo = {", "    expr = 1;", "    expected = 1;", "  };", "}" }
+    local empty = { "{ }" }
+
+    write_file(vim.fs.joinpath(tmp, "flake.nix"), empty)
+    write_file(vim.fs.joinpath(tmp, "foo_test.nix"), nix_unit)
+    write_file(vim.fs.joinpath(tmp, "FooTest.nix"), nix_unit)
+    write_file(vim.fs.joinpath(tmp, "test-fixture.nix"), empty)
+    write_file(vim.fs.joinpath(tmp, "default.nix"), nix_unit)
+
+    -- flake.nix always counts, regardless of contents
+    assert.is_true(discover.is_test_file(vim.fs.joinpath(tmp, "flake.nix")))
+    -- test-named files only count when they contain a nix-unit assertion
+    assert.is_true(discover.is_test_file(vim.fs.joinpath(tmp, "foo_test.nix")))
+    assert.is_true(discover.is_test_file(vim.fs.joinpath(tmp, "FooTest.nix")))
+    assert.is_false(discover.is_test_file(vim.fs.joinpath(tmp, "test-fixture.nix")))
+    -- non-test-named files never count, even with assertions
+    assert.is_false(discover.is_test_file(vim.fs.joinpath(tmp, "default.nix")))
     assert.is_false(discover.is_test_file("/workspace/testdata.lua"))
   end)
 
