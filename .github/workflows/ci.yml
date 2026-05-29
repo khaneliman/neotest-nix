@@ -12,8 +12,12 @@ concurrency:
 
 jobs:
   flake-check:
-    name: nix flake check
-    runs-on: ubuntu-latest
+    name: nix flake check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +31,7 @@ jobs:
             extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
 
       - name: Validate flake inputs
+        if: runner.os == 'Linux'
         uses: DeterminateSystems/flake-checker-action@v12
 
       - name: Run flake checks
