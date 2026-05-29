@@ -329,9 +329,31 @@ local nix_command_features = {
   "nix-command flakes",
 }
 
+local default_eval_outputs = {
+  { attr = "checks" },
+}
+
+---@param names string[]
+---@param pattern string?
+---@return string[]
+local function filter_names(names, pattern)
+  if pattern == nil then
+    return names
+  end
+
+  local filtered = {}
+  for _, name in ipairs(names) do
+    if name:match(pattern) ~= nil then
+      table.insert(filtered, name)
+    end
+  end
+  return filtered
+end
+
 ---@param root string
----@return { system: string, names: string[] }?
-local function eval_check_names(root)
+---@param specs neotest-nix.EvalOutput[]
+---@return { system: string, outputs: { attr: string, names: string[] }[] }?
+local function eval_outputs(root, specs)
   local nio = require("nio")
 
   ---@param command string[]
@@ -354,31 +376,38 @@ local function eval_check_names(root)
   end
   local system = vim.trim(system_result.stdout)
 
-  -- Check names for the current system. No --impure so the flake eval cache
-  -- applies; a missing checks.<system> simply exits non-zero.
-  local names_command = { "nix", "eval", "--json" }
-  vim.list_extend(names_command, nix_command_features)
-  vim.list_extend(names_command, { "--apply", "builtins.attrNames", (".#checks.%s"):format(system) })
+  local outputs = {}
+  for _, output_spec in ipairs(specs) do
+    -- No --impure so the flake eval cache applies; a missing
+    -- <attr>.<system> simply exits non-zero and is skipped.
+    local names_command = { "nix", "eval", "--json" }
+    vim.list_extend(names_command, nix_command_features)
+    vim.list_extend(
+      names_command,
+      { "--apply", "builtins.attrNames", (".#%s.%s"):format(output_spec.attr, system) }
+    )
 
-  local names_result = run(names_command)
-  if names_result.code ~= 0 or names_result.stdout == nil or names_result.stdout == "" then
-    return nil
+    local names_result = run(names_command)
+    if names_result.code == 0 and names_result.stdout ~= nil and names_result.stdout ~= "" then
+      local ok, names = pcall(vim.json.decode, names_result.stdout)
+      if ok and type(names) == "table" then
+        names = filter_names(names, output_spec.match)
+        if #names > 0 then
+          table.insert(outputs, { attr = output_spec.attr, names = names })
+        end
+      end
+    end
   end
 
-  local ok, names = pcall(vim.json.decode, names_result.stdout)
-  if not ok or type(names) ~= "table" then
-    return nil
-  end
-
-  return { system = system, names = names }
+  return { system = system, outputs = outputs }
 end
 
----Merge eval-discovered checks into a source-parsed position tree.
+---Merge eval-discovered flake outputs into a source-parsed position tree.
 ---@param tree neotest.Tree
 ---@param system string
----@param names string[]
+---@param outputs { attr: string, names: string[] }[]
 ---@return neotest.Tree
-function M._merge_eval_checks(tree, system, names)
+function M._merge_eval_outputs(tree, system, outputs)
   local existing = {}
   for _, position in tree:iter() do
     ---@cast position neotest-nix.Position
@@ -388,64 +417,75 @@ function M._merge_eval_checks(tree, system, names)
   end
 
   local file_path = tree:data().path
+  local list = tree:to_list()
+  local added = false
 
-  ---@type table[]
-  local system_child = {
-    {
-      id = ("neotest-nix:eval:checks.%s"):format(system),
-      name = system,
-      path = file_path,
-      type = "namespace",
-      range = { 0, 0, 0, 0 },
-    },
-  }
+  for _, output in ipairs(outputs) do
+    local attr = output.attr
 
-  for _, name in ipairs(names) do
-    local attr_path = ("checks.%s.%s"):format(system, name)
-    if not existing[attr_path] then
-      existing[attr_path] = true
-      table.insert(system_child, {
+    ---@type table[]
+    local system_child = {
+      {
+        id = ("neotest-nix:eval:%s.%s"):format(attr, system),
+        name = system,
+        path = file_path,
+        type = "namespace",
+        range = { 0, 0, 0, 0 },
+      },
+    }
+
+    for _, name in ipairs(output.names) do
+      local attr_path = ("%s.%s.%s"):format(attr, system, name)
+      if not existing[attr_path] then
+        existing[attr_path] = true
+        table.insert(system_child, {
+          {
+            id = attr_path,
+            name = name,
+            path = file_path,
+            type = "test",
+            range = { 0, 0, 0, 0 },
+            runner = "nix",
+            attr_path = attr_path,
+          },
+        })
+      end
+    end
+
+    -- Nothing new beyond what the source already declared for this output.
+    if #system_child > 1 then
+      added = true
+      table.insert(list, {
         {
-          id = attr_path,
-          name = name,
+          id = ("neotest-nix:eval:%s"):format(attr),
+          name = attr,
           path = file_path,
-          type = "test",
+          type = "namespace",
           range = { 0, 0, 0, 0 },
-          runner = "nix",
-          attr_path = attr_path,
         },
+        system_child,
       })
     end
   end
 
-  -- No new checks beyond what the source already declared.
-  if #system_child == 1 then
+  if not added then
     return tree
   end
 
-  local checks_child = {
-    {
-      id = "neotest-nix:eval:checks",
-      name = "checks",
-      path = file_path,
-      type = "namespace",
-      range = { 0, 0, 0, 0 },
-    },
-    system_child,
-  }
-
   local Tree = require("neotest.types").Tree
-  local list = tree:to_list()
-  table.insert(list, checks_child)
-
   return Tree.from_list(list, function(data)
     return data.id
   end)
 end
 
+---@class neotest-nix.EvalOutput
+---@field attr string Flake output to enumerate per system (e.g. "checks", "legacyPackages").
+---@field match? string Lua pattern; only attribute names matching it are kept.
+
 ---@class neotest-nix.Config
 ---@field parser_runtime_paths? string[] Extra runtimepath roots containing parser/nix.so.
----@field discover_eval_checks? boolean Evaluate the flake to discover generated checks.
+---@field discover_eval_checks? boolean Evaluate the flake to discover generated outputs.
+---@field eval_outputs? neotest-nix.EvalOutput[] Outputs to enumerate (defaults to checks).
 
 ---@param opts neotest-nix.Config?
 ---@return neotest.Adapter
@@ -482,9 +522,10 @@ function M.setup(opts)
 
       if opts.discover_eval_checks and vim.fs.basename(file_path) == "flake.nix" then
         local root = discover.root(file_path)
-        local eval = root ~= nil and eval_check_names(root) or nil
-        if eval ~= nil and #eval.names > 0 then
-          positions = M._merge_eval_checks(positions, eval.system, eval.names)
+        local eval = root ~= nil and eval_outputs(root, opts.eval_outputs or default_eval_outputs)
+          or nil
+        if eval ~= nil and #eval.outputs > 0 then
+          positions = M._merge_eval_outputs(positions, eval.system, eval.outputs)
         end
       end
 
