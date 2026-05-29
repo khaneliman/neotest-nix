@@ -59,6 +59,7 @@ describe("spec", function()
     }, run.command)
     assert.are.equal(root, run.cwd)
     assert.is_nil(run.context.attr)
+    assert.is_function(run.stream)
   end)
 
   it("builds a targeted check derivation for test positions", function()

@@ -175,14 +175,18 @@ end
 ---@param results table<string, neotest.Result>
 ---@param tree neotest.Tree
 ---@param output string
-local function add_vm_tracebacks(results, tree, output)
+---@param start_at integer?
+---@return integer
+local function add_vm_tracebacks(results, tree, output, start_at)
   local tracebacks = vm.parse_python_tracebacks(output)
-  if #tracebacks == 0 then
-    return
+  start_at = start_at or 1
+  if #tracebacks < start_at then
+    return #tracebacks
   end
 
   for _, position in ipairs(vm_positions(tree)) do
-    for _, traceback in ipairs(tracebacks) do
+    for index = start_at, #tracebacks do
+      local traceback = tracebacks[index]
       local line = vm.test_script_line(position, traceback.line)
       if line ~= nil then
         add_error(results, position.id, {
@@ -195,6 +199,8 @@ local function add_vm_tracebacks(results, tree, output)
       end
     end
   end
+
+  return #tracebacks
 end
 
 ---@param spec neotest.RunSpec
@@ -232,6 +238,44 @@ function M.results(spec, result, tree)
   end
 
   return paths.translate_result_paths(results, root)
+end
+
+---@param spec neotest.RunSpec
+---@param tree neotest.Tree
+---@return fun(output_stream: fun(): string): fun(): table<string, neotest.Result>?
+function M.stream(spec, tree)
+  return function(output_stream)
+    local output = {}
+    local parsed_error_count = 0
+    local traceback_count = 0
+
+    return function()
+      while true do
+        local line = output_stream()
+        if line == nil then
+          return nil
+        end
+
+        table.insert(output, line)
+        local text = table.concat(output, "\n")
+        local root = spec.cwd or vim.loop.cwd() or "."
+        local parsed_errors = M.parse_errors(text, root)
+        local stream_results = {}
+
+        for index = parsed_error_count + 1, #parsed_errors do
+          local parsed = parsed_errors[index]
+          add_error(stream_results, result_id_for_error(tree, spec, parsed), parsed)
+        end
+        parsed_error_count = #parsed_errors
+
+        traceback_count = add_vm_tracebacks(stream_results, tree, text, traceback_count + 1)
+
+        if not vim.tbl_isempty(stream_results) then
+          return paths.translate_result_paths(stream_results, root)
+        end
+      end
+    end
+  end
 end
 
 return M
