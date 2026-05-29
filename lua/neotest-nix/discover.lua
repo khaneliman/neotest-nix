@@ -1,5 +1,7 @@
 local M = {}
 
+local uv = vim.uv or vim.loop
+
 local excluded_dirs = {
   [".git"] = true,
   [".direnv"] = true,
@@ -14,13 +16,13 @@ local output_dir_patterns = {
 ---@param path string
 ---@return boolean
 local function path_exists(path)
-  return vim.loop.fs_stat(path) ~= nil
+  return uv.fs_stat(path) ~= nil
 end
 
 ---@param path string
 ---@return boolean
 local function is_file(path)
-  local stat = vim.loop.fs_stat(path)
+  local stat = uv.fs_stat(path)
   return stat ~= nil and stat.type == "file"
 end
 
@@ -55,7 +57,7 @@ end
 ---@param file_path string
 ---@return boolean
 local function has_nix_unit_assertion(file_path)
-  local stat = vim.loop.fs_stat(file_path)
+  local stat = uv.fs_stat(file_path)
   if stat == nil or stat.type ~= "file" then
     return false
   end

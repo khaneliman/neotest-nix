@@ -4,6 +4,8 @@ local results = require("neotest-nix.results")
 
 local M = {}
 
+local uv = vim.uv or vim.loop
+
 ---@class neotest-nix.Position : neotest.Position
 ---@field attr_path? string
 ---@field runner? "nix"|"nix-unit"
@@ -91,7 +93,7 @@ end
 ---@param path string
 ---@return string
 local function cwd_for(path)
-  return discover.root(path) or vim.loop.cwd() or "."
+  return discover.root(path) or uv.cwd() or "."
 end
 
 ---@param args neotest.RunArgs
