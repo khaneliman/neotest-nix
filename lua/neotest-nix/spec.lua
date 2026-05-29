@@ -5,6 +5,7 @@ local M = {}
 ---@class neotest-nix.Position : neotest.Position
 ---@field attr_path? string
 ---@field runner? "nix"|"nix-unit"
+---@field test_script_range? integer[]
 
 local nix_features = {
   "--extra-experimental-features",

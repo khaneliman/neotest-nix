@@ -14,6 +14,16 @@
         x86_64-linux = {
           integration = nixpkgs.legacyPackages.x86_64-linux.runCommand "integration" { } "";
         };
+
+        aarch64-linux = {
+          vm = nixpkgs.legacyPackages.aarch64-linux.testers.runNixOSTest {
+            name = "vm";
+            testScript = ''
+              start_all()
+              machine.succeed("true")
+            '';
+          };
+        };
       };
 
       tests = {
