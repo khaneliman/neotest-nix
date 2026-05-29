@@ -251,6 +251,12 @@ describe("results", function()
 
     local unit = parsed.unit
     assert.are.equal("failed", unit.status)
+    assert.are.equal(
+      "error: assertion failed\n       at "
+        .. vim.fs.joinpath(root, "checks", "unit.nix")
+        .. ":2:3:",
+      unit.short
+    )
     assert.are.same({
       message = "assertion failed",
       line = 1,
@@ -283,6 +289,7 @@ describe("results", function()
 
     local vm_result = parsed.vm
     assert.are.equal("failed", vm_result.status)
+    assert.are.equal(table.concat(lines, "\n"), vm_result.short)
     assert.are.same({
       message = "AssertionError: command failed",
       line = 6,

@@ -271,6 +271,9 @@ function M.stream(spec, tree)
         traceback_count = add_vm_tracebacks(stream_results, tree, text, traceback_count + 1)
 
         if not vim.tbl_isempty(stream_results) then
+          for _, result in pairs(stream_results) do
+            result.short = text
+          end
           return paths.translate_result_paths(stream_results, root)
         end
       end
