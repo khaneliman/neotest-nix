@@ -1,4 +1,5 @@
 local paths = require("neotest-nix.paths")
+local vm = require("neotest-nix.vm")
 
 local M = {}
 
@@ -104,6 +105,21 @@ local function test_positions(tree)
   return positions
 end
 
+---@param tree neotest.Tree
+---@return neotest-nix.Position[]
+local function vm_positions(tree)
+  local positions = {}
+
+  for _, position in tree:iter() do
+    ---@cast position neotest-nix.Position
+    if position.type == "test" and position.test_script_range ~= nil then
+      table.insert(positions, position)
+    end
+  end
+
+  return positions
+end
+
 ---@param position neotest.Position
 ---@param error neotest-nix.ParsedError
 ---@return boolean
@@ -156,6 +172,31 @@ local function add_error(results, id, error)
   })
 end
 
+---@param results table<string, neotest.Result>
+---@param tree neotest.Tree
+---@param output string
+local function add_vm_tracebacks(results, tree, output)
+  local tracebacks = vm.parse_python_tracebacks(output)
+  if #tracebacks == 0 then
+    return
+  end
+
+  for _, position in ipairs(vm_positions(tree)) do
+    for _, traceback in ipairs(tracebacks) do
+      local line = vm.test_script_line(position, traceback.line)
+      if line ~= nil then
+        add_error(results, position.id, {
+          message = traceback.message,
+          path = position.path,
+          line = line,
+          column = 0,
+          severity = vim.diagnostic.severity.ERROR,
+        })
+      end
+    end
+  end
+end
+
 ---@param spec neotest.RunSpec
 ---@param result neotest.StrategyResult
 ---@param tree neotest.Tree
@@ -180,6 +221,7 @@ function M.results(spec, result, tree)
   for _, parsed in ipairs(parsed_errors) do
     add_error(results, result_id_for_error(tree, spec, parsed), parsed)
   end
+  add_vm_tracebacks(results, tree, output)
 
   if vim.tbl_isempty(results) then
     results[tree:data().id] = {

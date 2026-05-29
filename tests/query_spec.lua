@@ -39,10 +39,10 @@ describe("nix query", function()
     local positions = parse_fixture()
 
     assert.same(
-      { "aarch64-darwin", "checks", "outputs", "tests", "x86_64-linux" },
+      { "aarch64-darwin", "aarch64-linux", "checks", "outputs", "tests", "x86_64-linux" },
       names_by_type(positions, "namespace")
     )
-    assert.same({ "integration", "testPass", "unit" }, names_by_type(positions, "test"))
+    assert.same({ "integration", "testPass", "unit", "vm" }, names_by_type(positions, "test"))
   end)
 
   it("marks nix-unit test output positions with runner metadata", function()
@@ -57,5 +57,21 @@ describe("nix query", function()
     end
 
     error("missing testPass position")
+  end)
+
+  it("captures NixOS VM testScript ranges", function()
+    local positions = parse_fixture()
+
+    for _, position in ipairs(positions) do
+      if position.name == "vm" then
+        assert.are.equal("nix", position.runner)
+        assert.are.equal("checks.aarch64-linux.vm", position.attr_path)
+        assert.is_not_nil(position.test_script_range)
+        assert.are.equal(20, position.test_script_range[1])
+        return
+      end
+    end
+
+    error("missing vm position")
   end)
 end)
