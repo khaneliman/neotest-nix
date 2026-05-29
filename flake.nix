@@ -21,7 +21,16 @@
           neotest-nix = prev.vimUtils.buildVimPlugin {
             pname = name;
             version = "0.0.0";
-            src = self;
+            # Allowlist only the files the plugin ships. Adding a new
+            # runtime dir (doc/, plugin/, after/, ...) means adding it here.
+            src = final.lib.fileset.toSource {
+              root = ./.;
+              fileset = final.lib.fileset.unions [
+                ./LICENSE
+                ./lua
+                ./queries
+              ];
+            };
             dependencies = with prev.vimPlugins; [
               neotest
               nvim-treesitter.grammarPlugins.nix
