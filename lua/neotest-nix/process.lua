@@ -2,35 +2,31 @@ local nio = require("nio")
 
 local M = {}
 
----@param output_path string
----@param data string?
-local function append_output(output_path, data)
-  if data == nil or data == "" then
-    return
-  end
-
-  local file = assert(io.open(output_path, "a"))
-  file:write(data)
-  file:close()
-end
-
 ---@async
 ---@param spec neotest.RunSpec
 ---@return neotest.Process
 function M.strategy(spec)
   local output_path = nio.fn.tempname()
-  assert(io.open(output_path, "w")):close()
+  ---@type file*?
+  local output_file = assert(io.open(output_path, "w"))
 
   local finish = nio.control.future()
   local output_finish = nio.control.future()
   local output_queue = nio.control.queue()
   local result_code
 
+  -- Hold a single handle for the process lifetime; flush per chunk so the
+  -- output file stays live-readable while avoiding an open/close per chunk.
   local function on_output(_, data)
-    append_output(output_path, data)
-    if data ~= nil and data ~= "" then
-      output_queue.put_nowait(data)
+    if data == nil or data == "" then
+      return
     end
+
+    if output_file ~= nil then
+      output_file:write(data)
+      output_file:flush()
+    end
+    output_queue.put_nowait(data)
   end
 
   local process = vim.system(spec.command, {
@@ -40,6 +36,10 @@ function M.strategy(spec)
     stdout = on_output,
   }, function(result)
     result_code = result.code
+    if output_file ~= nil then
+      output_file:close()
+      output_file = nil
+    end
     if not output_finish.is_set() then
       output_finish.set()
     end
