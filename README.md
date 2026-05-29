@@ -40,6 +40,8 @@ It discovers two kinds of tests in a flake-based project and runs them in place:
   source of the grammar works — `nvim-treesitter`, a manually built parser, or
   the `parser_runtime_paths` option below
 
+Run `:checkhealth neotest-nix` to verify the requirements above are met.
+
 ## Installation
 
 ### lazy.nvim
@@ -91,6 +93,28 @@ dependency) as runtime dependencies.
 
 ## Usage
 
+The adapter discovers tests like these straight from the source:
+
+```nix
+{
+  outputs =
+    { self, nixpkgs }:
+    {
+      # A flake check — run with `nix build`.
+      checks.x86_64-linux.hello =
+        nixpkgs.legacyPackages.x86_64-linux.runCommand "hello" { } "touch $out";
+
+      # nix-unit assertions — run with `nix-unit`.
+      tests = {
+        testAddition = {
+          expr = 1 + 1;
+          expected = 2;
+        };
+      };
+    };
+}
+```
+
 Open a `flake.nix` (or a `*.nix` file with `test` in its name containing
 nix-unit assertions) and use the standard Neotest commands:
 
@@ -132,7 +156,8 @@ require("neotest-nix")({
 - `flake.nix` is always treated as a test file.
 - Any other `*.nix` file is considered a test file only when its name contains
   `test` **and** it contains a nix-unit assertion (`expr` plus `expected` or
-  `expectedError`).
+  `expectedError`). A `default.nix` or `lib.nix` holding nix-unit tests is not
+  discovered unless it is renamed to match (e.g. `tests.nix`).
 - Positions are parsed from source with tree-sitter. When
   `discover_eval_checks` is enabled, flake outputs are additionally enumerated
   via `nix eval` and merged into the tree, so checks generated at evaluation
