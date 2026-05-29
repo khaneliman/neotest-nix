@@ -107,7 +107,10 @@ end
 ---@param parts string[]
 ---@return boolean
 local function is_nix_unit_test(parts)
-  return #parts >= 2 and parts[1] == "tests" and parts[#parts]:match(nix_unit_test_pattern) ~= nil
+  return #parts >= 1
+    and parts[1] ~= "checks"
+    and parts[#parts] ~= "tests"
+    and parts[#parts]:match(nix_unit_test_pattern) ~= nil
 end
 
 ---@param binding userdata

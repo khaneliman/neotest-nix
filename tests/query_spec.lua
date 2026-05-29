@@ -42,7 +42,10 @@ describe("nix query", function()
       { "aarch64-darwin", "aarch64-linux", "checks", "outputs", "tests", "x86_64-linux" },
       names_by_type(positions, "namespace")
     )
-    assert.same({ "integration", "testPass", "unit", "vm" }, names_by_type(positions, "test"))
+    assert.same(
+      { "integration", "testLibrary", "testPass", "unit", "vm" },
+      names_by_type(positions, "test")
+    )
   end)
 
   it("marks nix-unit test output positions with runner metadata", function()
@@ -57,6 +60,20 @@ describe("nix query", function()
     end
 
     error("missing testPass position")
+  end)
+
+  it("discovers nix-unit assertions under arbitrary flake suite names", function()
+    local positions = parse_fixture()
+
+    for _, position in ipairs(positions) do
+      if position.name == "testLibrary" then
+        assert.are.equal("nix-unit", position.runner)
+        assert.are.equal("libTests.nested.testLibrary", position.attr_path)
+        return
+      end
+    end
+
+    error("missing testLibrary position")
   end)
 
   it("captures NixOS VM testScript ranges", function()
