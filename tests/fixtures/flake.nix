@@ -32,5 +32,14 @@
           expected = 1;
         };
       };
+
+      libTests = {
+        nested = {
+          testLibrary = {
+            expr = 1 + 1;
+            expected = 2;
+          };
+        };
+      };
     };
 }
