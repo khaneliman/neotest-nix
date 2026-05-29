@@ -20,14 +20,18 @@
           neotest-nix = prev.vimUtils.buildVimPlugin {
             pname = name;
             version = "0.0.0";
-            # Allowlist only the files the plugin ships. Adding a new
-            # runtime dir (doc/, plugin/, after/, ...) means adding it here.
+            # Allowlist only the files the plugin ships. maybeMissing entries
+            # are picked up automatically if/when those runtime dirs are added.
             src = final.lib.fileset.toSource {
               root = ./.;
               fileset = final.lib.fileset.unions [
                 ./LICENSE
                 ./lua
                 ./queries
+                (final.lib.fileset.maybeMissing ./doc)
+                (final.lib.fileset.maybeMissing ./plugin)
+                (final.lib.fileset.maybeMissing ./after)
+                (final.lib.fileset.maybeMissing ./ftplugin)
               ];
             };
             dependencies = with prev.vimPlugins; [
