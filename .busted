@@ -1,0 +1,8 @@
+return {
+  _all = {
+    lpath = "lua/?.lua;lua/?/init.lua",
+  },
+  default = {
+    helper = "tests/minimal_init.lua",
+  },
+}
