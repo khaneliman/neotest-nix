@@ -8,6 +8,12 @@
     }:
     let
       luarcPkgs = pkgs.extend inputs.gen-luarc.overlays.default;
+      nixParser = pkgs.vimPlugins.nvim-treesitter.grammarPlugins.nix;
+      testPlugins = with pkgs.vimPlugins; [
+        neotest
+        nixParser
+        nvim-nio
+      ];
     in
     {
       devShells.default = pkgs.mkShell {
@@ -15,10 +21,12 @@
         shellHook = ''
           ${config.pre-commit.installationScript}
           ln -fs ${luarcPkgs.luarc-to-json config.pre-commit.settings.hooks.lua-ls.settings.configuration} .luarc.json
+          export NEOTEST_NIX_TEST_RTP="${pkgs.lib.makeSearchPathOutput "out" "" testPlugins}"
         '';
         packages =
           config.pre-commit.settings.enabledPackages
           ++ (with pkgs; [
+            lua51Packages.vusted
             lua-language-server
             nil
             nixfmt
