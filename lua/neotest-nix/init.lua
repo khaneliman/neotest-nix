@@ -324,8 +324,128 @@ function M._build_position(file_path, source, captured_nodes)
   return position
 end
 
+local nix_command_features = {
+  "--extra-experimental-features",
+  "nix-command flakes",
+}
+
+---@param root string
+---@return { system: string, names: string[] }?
+local function eval_check_names(root)
+  local nio = require("nio")
+
+  ---@param command string[]
+  local function run(command)
+    local future = nio.control.future()
+    vim.system(command, { cwd = root, text = true }, function(result)
+      future.set(result)
+    end)
+    return future.wait()
+  end
+
+  -- Current system: cheap impure builtin, does not evaluate the flake.
+  local system_command = { "nix", "eval", "--impure", "--raw" }
+  vim.list_extend(system_command, nix_command_features)
+  vim.list_extend(system_command, { "--expr", "builtins.currentSystem" })
+
+  local system_result = run(system_command)
+  if system_result.code ~= 0 or system_result.stdout == nil or system_result.stdout == "" then
+    return nil
+  end
+  local system = vim.trim(system_result.stdout)
+
+  -- Check names for the current system. No --impure so the flake eval cache
+  -- applies; a missing checks.<system> simply exits non-zero.
+  local names_command = { "nix", "eval", "--json" }
+  vim.list_extend(names_command, nix_command_features)
+  vim.list_extend(names_command, { "--apply", "builtins.attrNames", (".#checks.%s"):format(system) })
+
+  local names_result = run(names_command)
+  if names_result.code ~= 0 or names_result.stdout == nil or names_result.stdout == "" then
+    return nil
+  end
+
+  local ok, names = pcall(vim.json.decode, names_result.stdout)
+  if not ok or type(names) ~= "table" then
+    return nil
+  end
+
+  return { system = system, names = names }
+end
+
+---Merge eval-discovered checks into a source-parsed position tree.
+---@param tree neotest.Tree
+---@param system string
+---@param names string[]
+---@return neotest.Tree
+function M._merge_eval_checks(tree, system, names)
+  local existing = {}
+  for _, position in tree:iter() do
+    ---@cast position neotest-nix.Position
+    if position.attr_path ~= nil then
+      existing[position.attr_path] = true
+    end
+  end
+
+  local file_path = tree:data().path
+
+  ---@type table[]
+  local system_child = {
+    {
+      id = ("neotest-nix:eval:checks.%s"):format(system),
+      name = system,
+      path = file_path,
+      type = "namespace",
+      range = { 0, 0, 0, 0 },
+    },
+  }
+
+  for _, name in ipairs(names) do
+    local attr_path = ("checks.%s.%s"):format(system, name)
+    if not existing[attr_path] then
+      existing[attr_path] = true
+      table.insert(system_child, {
+        {
+          id = attr_path,
+          name = name,
+          path = file_path,
+          type = "test",
+          range = { 0, 0, 0, 0 },
+          runner = "nix",
+          attr_path = attr_path,
+        },
+      })
+    end
+  end
+
+  -- No new checks beyond what the source already declared.
+  if #system_child == 1 then
+    return tree
+  end
+
+  local checks_child = {
+    {
+      id = "neotest-nix:eval:checks",
+      name = "checks",
+      path = file_path,
+      type = "namespace",
+      range = { 0, 0, 0, 0 },
+    },
+    system_child,
+  }
+
+  local Tree = require("neotest.types").Tree
+  local list = tree:to_list()
+  table.insert(list, checks_child)
+
+  return Tree.from_list(list, function(data)
+    return data.id
+  end)
+end
+
 ---@class neotest-nix.Config
 ---@field parser_runtime_paths? string[] Extra runtimepath roots containing parser/nix.so.
+---@field discover_eval_checks? boolean Evaluate the flake to discover generated checks.
 
 ---@param opts neotest-nix.Config?
 ---@return neotest.Adapter
@@ -358,6 +478,14 @@ function M.setup(opts)
           vim.log.levels.WARN
         )
         return nil
+      end
+
+      if opts.discover_eval_checks and vim.fs.basename(file_path) == "flake.nix" then
+        local root = discover.root(file_path)
+        local eval = root ~= nil and eval_check_names(root) or nil
+        if eval ~= nil and #eval.names > 0 then
+          positions = M._merge_eval_checks(positions, eval.system, eval.names)
+        end
       end
 
       return positions
