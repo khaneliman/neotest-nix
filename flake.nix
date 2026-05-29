@@ -9,7 +9,6 @@
 
   outputs =
     inputs@{
-      self,
       nixpkgs,
       flake-parts,
       ...
@@ -67,7 +66,12 @@
       };
 
       perSystem =
-        { system, ... }:
+        {
+          config,
+          pkgs,
+          system,
+          ...
+        }:
         {
           _module.args.pkgs = import nixpkgs {
             inherit system;
@@ -76,14 +80,10 @@
             ];
           };
 
-          packages.default = self.packages.${system}.neotest-nix;
-          packages.neotest-nix = self.legacyPackages.${system}.vimPlugins.neotest-nix;
-          legacyPackages = import nixpkgs {
-            inherit system;
-            overlays = [
-              plugin-overlay
-            ];
-          };
+          legacyPackages = pkgs;
+
+          packages.neotest-nix = pkgs.vimPlugins.neotest-nix;
+          packages.default = config.packages.neotest-nix;
         };
 
       flake.overlays.default = plugin-overlay;
