@@ -2,9 +2,13 @@
   description = "A Neotest adapter for Nix flakes.";
 
   nixConfig = {
-    extra-substituters = [ "https://nix-community.cachix.org" ];
+    extra-substituters = [
+      "https://nix-community.cachix.org"
+      "https://neotest-nix.cachix.org"
+    ];
     extra-trusted-public-keys = [
       "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+      "neotest-nix.cachix.org-1:6XwnLB/F0uhwJkg+yDehvd7PJb77uXi+/X0zBv784d0="
     ];
   };
 
