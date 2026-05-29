@@ -8,7 +8,7 @@
     }:
     let
       luarcPkgs = pkgs.extend inputs.gen-luarc.overlays.default;
-      nixParser = pkgs.vimPlugins.nvim-treesitter.grammarPlugins.nix;
+      nixParser = pkgs.neovimUtils.grammarToPlugin pkgs.tree-sitter-grammars.tree-sitter-nix;
       testPlugins = with pkgs.vimPlugins; [
         neotest
         nixParser

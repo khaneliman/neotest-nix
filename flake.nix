@@ -17,6 +17,12 @@
       name = "neotest-nix";
       plugin-overlay = final: prev: {
         vimPlugins = prev.vimPlugins // {
+          # Grammar-only plugin built straight from the upstream tree-sitter-nix
+          # grammar, so the adapter depends on the parser alone rather than on
+          # the nvim-treesitter plugin. The runtime code loads it through the
+          # built-in vim.treesitter APIs.
+          tree-sitter-nix-grammar = prev.neovimUtils.grammarToPlugin prev.tree-sitter-grammars.tree-sitter-nix;
+
           neotest-nix = prev.vimUtils.buildVimPlugin {
             pname = name;
             version = "0.0.0";
@@ -34,10 +40,10 @@
                 (final.lib.fileset.maybeMissing ./ftplugin)
               ];
             };
-            dependencies = with prev.vimPlugins; [
-              neotest
-              nvim-treesitter.grammarPlugins.nix
-              nvim-nio
+            dependencies = [
+              final.vimPlugins.neotest
+              final.vimPlugins.nvim-nio
+              final.vimPlugins.tree-sitter-nix-grammar
             ];
             doCheck = false;
           };

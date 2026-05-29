@@ -33,10 +33,12 @@ It discovers two kinds of tests in a flake-based project and runs them in place:
 - [Nix](https://nixos.org/) with the `nix-command` and `flakes` features enabled
 - [`nix-unit`](https://github.com/nix-community/nix-unit) on `PATH` (only for
   nix-unit tests)
-- Plugin dependencies: [`neotest`](https://github.com/nvim-neotest/neotest),
-  [`nvim-nio`](https://github.com/nvim-neotest/nvim-nio), and the
-  [`tree-sitter-nix`](https://github.com/nvim-treesitter/nvim-treesitter)
-  grammar
+- Plugin dependencies: [`neotest`](https://github.com/nvim-neotest/neotest)
+  and [`nvim-nio`](https://github.com/nvim-neotest/nvim-nio)
+- The `nix` tree-sitter grammar on your runtimepath (a `parser/nix.so`).
+  Positions are parsed through Neovim's built-in `vim.treesitter`, so any
+  source of the grammar works — `nvim-treesitter`, a manually built parser, or
+  the `parser_runtime_paths` option below
 
 ## Installation
 
@@ -47,6 +49,8 @@ It discovers two kinds of tests in a flake-based project and runs them in place:
   "nvim-neotest/neotest",
   dependencies = {
     "nvim-neotest/nvim-nio",
+    -- Only needed to install the `nix` grammar; the adapter itself uses
+    -- Neovim's built-in vim.treesitter. Any grammar source works.
     "nvim-treesitter/nvim-treesitter",
     "khaneliman/neotest-nix",
   },
@@ -81,8 +85,9 @@ This repo ships an overlay that exposes `vimPlugins.neotest-nix`:
 }
 ```
 
-The packaged plugin pulls in `neotest`, `nvim-nio`, and the nix grammar as
-runtime dependencies.
+The packaged plugin pulls in `neotest`, `nvim-nio`, and a grammar-only plugin
+built straight from the upstream `tree-sitter-nix` grammar (no `nvim-treesitter`
+dependency) as runtime dependencies.
 
 ## Usage
 

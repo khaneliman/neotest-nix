@@ -9,12 +9,11 @@
     let
       luarcPkgs = pkgs.extend inputs.gen-luarc.overlays.default;
       neorocksPkgs = pkgs.extend inputs.neorocks.overlays.default;
-      nixParser = neorocksPkgs.vimPlugins.nvim-treesitter.grammarPlugins.nix;
+      nixParser = pkgs.neovimUtils.grammarToPlugin pkgs.tree-sitter-grammars.tree-sitter-nix;
       luarc = luarcPkgs.mk-luarc {
         nvim = luarcPkgs.neovim-unwrapped;
         plugins = with luarcPkgs.vimPlugins; [
           neotest
-          nvim-treesitter
           nvim-nio
         ];
         disabled-diagnostics = [
