@@ -142,20 +142,49 @@ end
 ---@param tree neotest.Tree
 ---@param spec neotest.RunSpec
 ---@param error neotest-nix.ParsedError
+---@param positions neotest.Position[]
 ---@return string
-local function result_id_for_error(tree, spec, error)
+local function result_id_for_error(tree, spec, error, positions)
   local context = spec.context or {}
   if context.pos_id ~= nil and tree:get_key(context.pos_id) ~= nil then
     return context.pos_id
   end
 
-  for _, position in ipairs(test_positions(tree)) do
+  for _, position in ipairs(positions) do
     if contains_error(position, error) then
       return position.id
     end
   end
 
   return tree:data().id
+end
+
+---Select the single VM test a traceback can be attributed to.
+---A NixOS VM failure prints a Python traceback whose line numbers are
+---relative to that test's generated script; line numbers reset per test,
+---so they cannot tell sibling VM tests apart. Only attribute when the run
+---unambiguously targets one VM test: either there is a single VM position,
+---or the run context names one. A broader run (e.g. `nix flake check` over
+---several VM tests) returns nil rather than blaming every VM test.
+---@param tree neotest.Tree
+---@param spec neotest.RunSpec
+---@return neotest-nix.Position?
+local function vm_target(tree, spec)
+  local positions = vm_positions(tree)
+  if #positions <= 1 then
+    return positions[1]
+  end
+
+  local context = spec.context or {}
+  if context.pos_id ~= nil then
+    for _, position in ipairs(positions) do
+      if position.id == context.pos_id then
+        return position
+      end
+    end
+  end
+
+  return nil
 end
 
 ---@param results table<string, neotest.Result>
@@ -176,30 +205,28 @@ local function add_error(results, id, error)
 end
 
 ---@param results table<string, neotest.Result>
----@param tree neotest.Tree
+---@param target neotest-nix.Position?
 ---@param output string
 ---@param start_at integer?
 ---@return integer
-local function add_vm_tracebacks(results, tree, output, start_at)
+local function add_vm_tracebacks(results, target, output, start_at)
   local tracebacks = vm.parse_python_tracebacks(output)
   start_at = start_at or 1
-  if #tracebacks < start_at then
+  if target == nil or #tracebacks < start_at then
     return #tracebacks
   end
 
-  for _, position in ipairs(vm_positions(tree)) do
-    for index = start_at, #tracebacks do
-      local traceback = tracebacks[index]
-      local line = vm.test_script_line(position, traceback.line)
-      if line ~= nil then
-        add_error(results, position.id, {
-          message = traceback.message,
-          path = position.path,
-          line = line,
-          column = 0,
-          severity = vim.diagnostic.severity.ERROR,
-        })
-      end
+  for index = start_at, #tracebacks do
+    local traceback = tracebacks[index]
+    local line = vm.test_script_line(target, traceback.line)
+    if line ~= nil then
+      add_error(results, target.id, {
+        message = traceback.message,
+        path = target.path,
+        line = line,
+        column = 0,
+        severity = vim.diagnostic.severity.ERROR,
+      })
     end
   end
 
@@ -211,7 +238,7 @@ end
 ---@param tree neotest.Tree
 ---@return table<string, neotest.Result>
 function M.results(spec, result, tree)
-  local root = spec.cwd or vim.loop.cwd() or "."
+  local root = spec.cwd or uv.cwd() or "."
   local output = read_file(result.output) or result.output or ""
   output = paths.translate_string(output, root)
 
@@ -226,11 +253,12 @@ function M.results(spec, result, tree)
 
   local parsed_errors = M.parse_errors(output, root)
   local results = {}
+  local positions = test_positions(tree)
 
   for _, parsed in ipairs(parsed_errors) do
-    add_error(results, result_id_for_error(tree, spec, parsed), parsed)
+    add_error(results, result_id_for_error(tree, spec, parsed, positions), parsed)
   end
-  add_vm_tracebacks(results, tree, output)
+  add_vm_tracebacks(results, vm_target(tree, spec), output)
 
   if vim.tbl_isempty(results) then
     results[tree:data().id] = {
@@ -251,6 +279,8 @@ function M.stream(spec, tree)
     local output = {}
     local parsed_error_count = 0
     local traceback_count = 0
+    local positions = test_positions(tree)
+    local target = vm_target(tree, spec)
 
     return function()
       while true do
@@ -261,17 +291,17 @@ function M.stream(spec, tree)
 
         table.insert(output, line)
         local text = table.concat(output, "\n")
-        local root = spec.cwd or vim.loop.cwd() or "."
+        local root = spec.cwd or uv.cwd() or "."
         local parsed_errors = M.parse_errors(text, root)
         local stream_results = {}
 
         for index = parsed_error_count + 1, #parsed_errors do
           local parsed = parsed_errors[index]
-          add_error(stream_results, result_id_for_error(tree, spec, parsed), parsed)
+          add_error(stream_results, result_id_for_error(tree, spec, parsed, positions), parsed)
         end
         parsed_error_count = #parsed_errors
 
-        traceback_count = add_vm_tracebacks(stream_results, tree, text, traceback_count + 1)
+        traceback_count = add_vm_tracebacks(stream_results, target, text, traceback_count + 1)
 
         if not vim.tbl_isempty(stream_results) then
           for _, result in pairs(stream_results) do
