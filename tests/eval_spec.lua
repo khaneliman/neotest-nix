@@ -6,17 +6,41 @@ end
 
 local function file_tree()
   return Tree.from_list({
-    { id = "flake.nix", name = "flake.nix", path = "/p/flake.nix", type = "file", range = { 0, 0, 10, 0 } },
+    {
+      id = "flake.nix",
+      name = "flake.nix",
+      path = "/p/flake.nix",
+      type = "file",
+      range = { 0, 0, 10, 0 },
+    },
   }, get_id)
 end
 
 local function tree_with_literal_check()
   return Tree.from_list({
-    { id = "flake.nix", name = "flake.nix", path = "/p/flake.nix", type = "file", range = { 0, 0, 10, 0 } },
     {
-      { id = "checks", name = "checks", path = "/p/flake.nix", type = "namespace", range = { 1, 0, 5, 0 } },
+      id = "flake.nix",
+      name = "flake.nix",
+      path = "/p/flake.nix",
+      type = "file",
+      range = { 0, 0, 10, 0 },
+    },
+    {
       {
-        { id = "sys", name = "x86_64-linux", path = "/p/flake.nix", type = "namespace", range = { 2, 0, 4, 0 } },
+        id = "checks",
+        name = "checks",
+        path = "/p/flake.nix",
+        type = "namespace",
+        range = { 1, 0, 5, 0 },
+      },
+      {
+        {
+          id = "sys",
+          name = "x86_64-linux",
+          path = "/p/flake.nix",
+          type = "namespace",
+          range = { 2, 0, 4, 0 },
+        },
         {
           {
             id = "checks.x86_64-linux.unit",
@@ -51,7 +75,8 @@ describe("eval output merge", function()
   local adapter = require("neotest-nix")
 
   it("adds generated checks as runnable test positions", function()
-    local merged = adapter._merge_eval_outputs(file_tree(), "x86_64-linux", checks({ "parseLix", "treefmt" }))
+    local merged =
+      adapter._merge_eval_outputs(file_tree(), "x86_64-linux", checks({ "parseLix", "treefmt" }))
     local tests = tests_by_attr(merged)
 
     local parse = tests["checks.x86_64-linux.parseLix"]
@@ -101,7 +126,11 @@ describe("eval output merge", function()
   end)
 
   it("does not duplicate outputs already present in source", function()
-    local merged = adapter._merge_eval_outputs(tree_with_literal_check(), "x86_64-linux", checks({ "unit", "extra" }))
+    local merged = adapter._merge_eval_outputs(
+      tree_with_literal_check(),
+      "x86_64-linux",
+      checks({ "unit", "extra" })
+    )
 
     local count = 0
     for _, position in merged:iter() do
