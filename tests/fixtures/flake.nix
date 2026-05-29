@@ -15,5 +15,12 @@
           integration = nixpkgs.legacyPackages.x86_64-linux.runCommand "integration" { } "";
         };
       };
+
+      tests = {
+        testPass = {
+          expr = 1;
+          expected = 1;
+        };
+      };
     };
 }

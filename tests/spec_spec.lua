@@ -94,6 +94,31 @@ describe("spec", function()
     assert.are.equal("checks.aarch64-darwin.unit", run.context.attr)
   end)
 
+  it("builds a targeted nix-unit expression for nix-unit tests", function()
+    local root = project()
+    local test = node({
+      attr_path = "tests.testPass",
+      id = "testPass",
+      name = "testPass",
+      path = vim.fs.joinpath(root, "flake.nix"),
+      runner = "nix-unit",
+      type = "test",
+    })
+
+    local run = build_spec({ tree = test })
+
+    assert.same({
+      "nix-unit",
+      "--extra-experimental-features",
+      "flakes",
+      "--expr",
+      "{ testPass = (builtins.getFlake (toString ./. )).tests.testPass; }",
+    }, run.command)
+    assert.are.equal(root, run.cwd)
+    assert.are.equal("tests.testPass", run.context.attr)
+    assert.are.equal("nix-unit", run.context.runner)
+  end)
+
   it("does not build specs for directory positions", function()
     ---@type any
     local run_args = {
