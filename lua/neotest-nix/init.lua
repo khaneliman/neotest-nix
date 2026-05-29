@@ -452,7 +452,7 @@ function M._merge_eval_outputs(tree, system, outputs)
       end
     end
 
-    -- Nothing new beyond what the source already declared for this output.
+    -- Only add the output when it has names the source didn't already declare.
     if #system_child > 1 then
       added = true
       table.insert(list, {
