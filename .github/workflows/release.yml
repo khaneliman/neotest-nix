@@ -27,6 +27,56 @@ jobs:
           config-file: .github/release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      - name: Read release PR branch
+        id: release-pr
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        env:
+          PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          branch="$(printf '%s' "$PR_JSON" | jq -r '.headBranchName // empty')"
+          if [ -z "$branch" ]; then
+            echo "release-please did not report a release PR branch" >&2
+            exit 1
+          fi
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        with:
+          ref: ${{ steps.release-pr.outputs.branch }}
+
+      - name: Install Nix
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            extra-substituters = https://nix-community.cachix.org
+            extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
+
+      - name: Format release PR
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        run: nix fmt
+
+      - name: Autosquash formatted release PR
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        env:
+          BRANCH: ${{ steps.release-pr.outputs.branch }}
+        run: |
+          if git diff --quiet; then
+            echo "Release PR is already formatted."
+            exit 0
+          fi
+
+          release_commit="$(git rev-parse HEAD)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit --fixup="$release_commit"
+          GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash "$release_commit^"
+          git push --force-with-lease origin "HEAD:$BRANCH"
+
   luarocks-upload:
     name: LuaRocks Upload
     needs: release-please
