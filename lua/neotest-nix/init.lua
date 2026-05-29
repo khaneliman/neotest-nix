@@ -2,6 +2,7 @@
 
 local discover = require("neotest-nix.discover")
 local parser = require("neotest-nix.parser")
+local spec = require("neotest-nix.spec")
 
 local M = {}
 
@@ -183,6 +184,7 @@ function M.setup(opts)
     root = discover.root,
     is_test_file = discover.is_test_file,
     filter_dir = discover.filter_dir,
+    build_spec = spec.build_spec,
 
     ---@param file_path string
     discover_positions = function(file_path)
