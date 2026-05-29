@@ -20,6 +20,7 @@
 
         settings.global.excludes = [
           "*.luacheckrc"
+          "CHANGELOG.md"
           "LICENSE"
           "flake.lock"
         ];
