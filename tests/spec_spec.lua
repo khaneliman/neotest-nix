@@ -56,6 +56,7 @@ describe("spec", function()
       "--extra-experimental-features",
       "nix-command flakes",
       "--keep-going",
+      "--no-write-lock-file",
     }, run.command)
     assert.are.equal(root, run.cwd)
     assert.is_nil(run.context.attr)
@@ -90,6 +91,7 @@ describe("spec", function()
       "--extra-experimental-features",
       "nix-command flakes",
       "--keep-going",
+      "--no-write-lock-file",
       ".#checks.aarch64-darwin.unit",
       "--print-build-logs",
     }, run.command)

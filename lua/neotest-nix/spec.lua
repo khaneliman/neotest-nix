@@ -284,6 +284,8 @@ function M.build_spec(args, opts)
     }
     vim.list_extend(command, nix_features)
     table.insert(command, "--keep-going")
+    -- Do not lock the flake on disk just to run tests.
+    table.insert(command, "--no-write-lock-file")
   elseif position.runner == "nix-unit" then
     command = {
       "nix-unit",
@@ -298,6 +300,8 @@ function M.build_spec(args, opts)
     }
     vim.list_extend(command, nix_features)
     table.insert(command, "--keep-going")
+    -- Do not lock the flake on disk just to run tests.
+    table.insert(command, "--no-write-lock-file")
     table.insert(command, ".#" .. attr)
   end
 
