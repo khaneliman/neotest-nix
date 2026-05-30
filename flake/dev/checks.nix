@@ -10,7 +10,7 @@
       luarcPkgs = pkgs.extend inputs.gen-luarc.overlays.default;
       neorocksPkgs = pkgs.extend inputs.neorocks.overlays.default;
       nixParser = pkgs.neovimUtils.grammarToPlugin pkgs.tree-sitter-grammars.tree-sitter-nix;
-      luarc = luarcPkgs.mk-luarc {
+      baseLuarc = luarcPkgs.mk-luarc {
         nvim = luarcPkgs.neovim-unwrapped;
         plugins = with luarcPkgs.vimPlugins; [
           neotest
@@ -20,6 +20,32 @@
           "duplicate-set-field"
           "undefined-doc-class"
           "undefined-doc-name"
+          # luassert's assert.* fields are built dynamically; EmmyLua has no
+          # type defs for them, so disable the field check rather than annotate.
+          "undefined-field"
+        ];
+      };
+      # mk-luarc has no `globals` knob, so merge busted's test globals into its
+      # output. One .luarc.json then serves both lua-language-server and EmmyLua.
+      luarc = luarcPkgs.lib.recursiveUpdate baseLuarc {
+        diagnostics.globals = [
+          "describe"
+          "it"
+          "before_each"
+          "after_each"
+          "pending"
+          "setup"
+          "teardown"
+          "lazy_setup"
+          "lazy_teardown"
+          "finally"
+          "insulate"
+          "expose"
+          "randomize"
+          "assert"
+          "spy"
+          "stub"
+          "mock"
         ];
       };
     in
