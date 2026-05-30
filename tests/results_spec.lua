@@ -388,18 +388,18 @@ describe("nix-unit results", function()
 
   -- Mirrors the per-attribute output documented by nix-unit.
   local sample = {
-    "\u{274C} testFail",
+    "\226\157\140 testFail",
     "{ x = 1; } != { y = 1; }",
     "",
-    "\u{2622}\u{FE0F} testFailEval",
+    "\226\152\162\239\184\143 testFailEval",
     "error:",
     "       … while calling the 'throw' builtin",
     "",
     "       error: NO U",
     "",
-    "\u{2705} testPass",
+    "\226\156\133 testPass",
     "",
-    "\u{1F622} 1/3 successful",
+    "\240\159\152\162 1/3 successful",
     "error: Tests failed",
   }
 
@@ -442,11 +442,11 @@ describe("nix-unit results", function()
     local parsed = results.results(run_spec(root, { runner = "nix-unit" }), {
       code = 0,
       output = output_file({
-        "\u{2705} testPass",
-        "\u{2705} testFail",
-        "\u{2705} testFailEval",
+        "\226\156\133 testPass",
+        "\226\156\133 testFail",
+        "\226\156\133 testFailEval",
         "",
-        "\u{1F389} 3/3 successful",
+        "\240\159\142\137 3/3 successful",
       }),
     }, position_tree)
 

@@ -98,9 +98,9 @@ end
 -- followed by an optional detail block (a value diff or an evaluation error)
 -- that runs until the next attribute or the summary line.
 local nix_unit_markers = {
-  ["\u{2705}"] = "passed", -- ✅
-  ["\u{274C}"] = "failed", -- ❌
-  ["\u{2622}"] = "failed", -- ☢ (radioactive sign, optionally + variation selector)
+  ["\226\156\133"] = "passed", -- ✅
+  ["\226\157\140"] = "failed", -- ❌
+  ["\226\152\162"] = "failed", -- ☢ (radioactive sign, optionally + variation selector)
 }
 
 ---@param line string
