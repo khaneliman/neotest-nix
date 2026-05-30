@@ -10,15 +10,25 @@ local M = {}
 local system_pattern = spec.system_pattern
 local nix_unit_test_pattern = "^test"
 
+---@type string?
+local cached_query
+
+---Load and cache the tree-sitter query. Deferred until first discovery so a
+---bare `require("neotest-nix")` performs no file IO at module load.
 ---@return string
 local function load_query()
+  if cached_query ~= nil then
+    return cached_query
+  end
+
   local query_path = vim.api.nvim_get_runtime_file("queries/nix/neotest-nix.scm", false)[1]
   assert(query_path, "neotest-nix: missing queries/nix/neotest-nix.scm")
 
   local file = assert(io.open(query_path, "r"))
   local query = file:read("*a")
   file:close()
-  return query
+  cached_query = query
+  return cached_query
 end
 
 ---@param node userdata
@@ -491,52 +501,62 @@ end
 ---@field discover_eval_checks? boolean Evaluate the flake to discover generated outputs.
 ---@field eval_outputs? neotest-nix.EvalOutput[] Outputs to enumerate (defaults to checks).
 
+-- Active configuration. The module table itself is the Neotest adapter (see
+-- neotest-haskell), so `setup`/`__call` mutate this shared state and return M.
+-- Neotest uses a single adapter instance, so the last configuration wins.
+---@type neotest-nix.Config
+M._opts = {}
+
+M.name = "neotest-nix"
+M.root = discover.root
+M.is_test_file = discover.is_test_file
+M.filter_dir = discover.filter_dir
+M.build_spec = spec.build_spec
+M.results = results.results
+
+---@async
+---@param file_path string
+---@return neotest.Tree?
+function M.discover_positions(file_path)
+  local opts = M._opts
+  parser.ensure_nix_parser(opts.parser_runtime_paths)
+
+  local lib = require("neotest.lib")
+  ---@type any
+  local parse_options = {
+    build_position = 'require("neotest-nix")._build_position',
+  }
+  local ok, positions =
+    pcall(lib.treesitter.parse_positions, file_path, load_query(), parse_options)
+  if not ok then
+    vim.notify(
+      ("neotest-nix: failed to parse %s: %s"):format(file_path, positions),
+      vim.log.levels.WARN
+    )
+    return nil
+  end
+
+  if opts.discover_eval_checks and vim.fs.basename(file_path) == "flake.nix" then
+    local root = discover.root(file_path)
+    local eval = root ~= nil and eval_outputs(root, opts.eval_outputs or default_eval_outputs)
+      or nil
+    if eval ~= nil and #eval.outputs > 0 then
+      positions = M._merge_eval_outputs(positions, eval.system, eval.outputs)
+    end
+  end
+
+  return positions
+end
+
+---Configure the adapter. Returns the adapter (the module table itself), so all
+---of `require("neotest-nix")`, `require("neotest-nix")(opts)` and
+---`require("neotest-nix").setup(opts)` yield the same working adapter.
 ---@param opts neotest-nix.Config?
 ---@return neotest.Adapter
 function M.setup(opts)
-  opts = opts or {}
-  local query = load_query()
-
-  return {
-    name = "neotest-nix",
-
-    root = discover.root,
-    is_test_file = discover.is_test_file,
-    filter_dir = discover.filter_dir,
-    build_spec = spec.build_spec,
-    results = results.results,
-
-    ---@async
-    ---@param file_path string
-    discover_positions = function(file_path)
-      parser.ensure_nix_parser(opts.parser_runtime_paths)
-
-      local lib = require("neotest.lib")
-      ---@type any
-      local parse_options = {
-        build_position = 'require("neotest-nix")._build_position',
-      }
-      local ok, positions = pcall(lib.treesitter.parse_positions, file_path, query, parse_options)
-      if not ok then
-        vim.notify(
-          ("neotest-nix: failed to parse %s: %s"):format(file_path, positions),
-          vim.log.levels.WARN
-        )
-        return nil
-      end
-
-      if opts.discover_eval_checks and vim.fs.basename(file_path) == "flake.nix" then
-        local root = discover.root(file_path)
-        local eval = root ~= nil and eval_outputs(root, opts.eval_outputs or default_eval_outputs)
-          or nil
-        if eval ~= nil and #eval.outputs > 0 then
-          positions = M._merge_eval_outputs(positions, eval.system, eval.outputs)
-        end
-      end
-
-      return positions
-    end,
-  }
+  M._opts = opts or {}
+  ---@diagnostic disable-next-line: return-type-mismatch
+  return M
 end
 
 return setmetatable(M, {
