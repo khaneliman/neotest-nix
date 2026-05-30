@@ -14,8 +14,27 @@ permissions:
   pull-requests: write
 
 jobs:
+  release-check:
+    name: Release checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            extra-substituters = https://nix-community.cachix.org
+            extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
+
+      - name: Run flake checks
+        run: nix flake check --print-build-logs
+
   release-please:
     name: Release Please
+    needs: release-check
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
