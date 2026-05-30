@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.2](https://github.com/khaneliman/neotest-nix/compare/v2.1.1...v2.1.2) (2026-05-30)
+
+
+### Bug Fixes
+
+* namespace eval-discovered position ids per flake file ([2167506](https://github.com/khaneliman/neotest-nix/commit/21675061735cf78f17fabe058f834d7ea5c78791))
+* stop test runs from writing flake.lock to the repo ([1a0dc28](https://github.com/khaneliman/neotest-nix/commit/1a0dc2859de063814881e95d4d2bcbf45989ea0b))
+* use Lua 5.1 unicode escapes ([79966f9](https://github.com/khaneliman/neotest-nix/commit/79966f98f4135557f02b16a888c77a67c421e645))
+
 ## [2.1.1](https://github.com/khaneliman/neotest-nix/compare/v2.1.0...v2.1.1) (2026-05-30)
 
 
