@@ -17,6 +17,60 @@ local function nix_grammar_available()
   return (pcall(vim.treesitter.language.add, "nix"))
 end
 
+---@type table<string, type>
+local known_config_fields = {
+  parser_runtime_paths = "table",
+  discover_eval_checks = "boolean",
+  eval_outputs = "table",
+}
+
+---Inspect the active adapter configuration for typos and wrong-typed fields.
+---setup() rejects bad types outright, so the value here is catching unknown
+---keys (which vim.validate ignores) and a config set without going through setup.
+local function check_config()
+  local ok, adapter = pcall(require, "neotest-nix")
+  if not ok then
+    return
+  end
+
+  local opts = adapter._opts or {}
+  if next(opts) == nil then
+    health.ok("using default configuration")
+    return
+  end
+
+  local valid = true
+  for key, value in pairs(opts) do
+    local expected = known_config_fields[key]
+    if expected == nil then
+      valid = false
+      health.warn(
+        ("unknown config key `%s`"):format(key),
+        "Check for a typo; see :h neotest-nix-configuration"
+      )
+    elseif type(value) ~= expected then
+      valid = false
+      health.error(("config `%s` must be a %s, got %s"):format(key, expected, type(value)))
+    end
+  end
+
+  if type(opts.eval_outputs) == "table" then
+    for index, output in ipairs(opts.eval_outputs) do
+      if type(output) ~= "table" or type(output.attr) ~= "string" then
+        valid = false
+        health.error(("eval_outputs[%d] must be a table with a string `attr`"):format(index))
+      elseif output.match ~= nil and type(output.match) ~= "string" then
+        valid = false
+        health.error(("eval_outputs[%d].match must be a string"):format(index))
+      end
+    end
+  end
+
+  if valid then
+    health.ok("configuration looks valid")
+  end
+end
+
 function M.check()
   health.start("neotest-nix")
 
@@ -61,6 +115,8 @@ function M.check()
       "Install the grammar (nvim-treesitter, a built parser, or the parser_runtime_paths option)"
     )
   end
+
+  check_config()
 end
 
 return M
