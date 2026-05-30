@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/khaneliman/neotest-nix/compare/v2.1.0...v2.1.1) (2026-05-30)
+
+
+### Bug Fixes
+
+* stop discovery from writing flake.lock to the repo ([b5c8014](https://github.com/khaneliman/neotest-nix/commit/b5c80148f79a3936d1bf083d8fdd16c7303a3c25))
+
 ## [2.1.0](https://github.com/khaneliman/neotest-nix/compare/v2.0.0...v2.1.0) (2026-05-30)
 
 
