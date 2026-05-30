@@ -25,6 +25,11 @@
         '';
         packages =
           config.pre-commit.settings.enabledPackages
+          ++ [
+            # The `pre-commit` CLI itself so `pre-commit run --all-files` works
+            # in the shell; enabledPackages only carries the hooks' tools.
+            config.pre-commit.settings.package
+          ]
           ++ (with pkgs; [
             lua51Packages.vusted
             lua-language-server
