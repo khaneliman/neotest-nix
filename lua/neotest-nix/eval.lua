@@ -59,7 +59,9 @@ function M.eval_outputs(root, specs)
   for _, output_spec in ipairs(specs) do
     -- No --impure so the flake eval cache applies; a missing
     -- <attr>.<system> simply exits non-zero and is skipped.
-    local names_command = { "nix", "eval", "--json" }
+    -- --no-write-lock-file: discovery must not mutate the repo by locking the
+    -- flake on disk.
+    local names_command = { "nix", "eval", "--json", "--no-write-lock-file" }
     vim.list_extend(names_command, nix_command_features)
     vim.list_extend(
       names_command,
@@ -127,7 +129,9 @@ function M.detect_nix_unit_flake(root, test_names)
 
   local nio = require("nio")
   -- --impure: getFlake refuses an unlocked local flake reference otherwise.
-  local command = { "nix", "eval", "--impure", "--json" }
+  -- --no-write-lock-file: discovery must not mutate the repo by locking the
+  -- flake on disk.
+  local command = { "nix", "eval", "--impure", "--json", "--no-write-lock-file" }
   vim.list_extend(command, nix_command_features)
   vim.list_extend(command, { "--expr", M.nix_unit_flake_expr(test_names) })
 
