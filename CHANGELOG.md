@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.0.0](https://github.com/khaneliman/neotest-nix/compare/v1.0.0...v2.0.0) (2026-05-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* validate adapter config in setup()
+
+### Features
+
+* **dev:** add pre-commit CLI to dev shell ([8202f26](https://github.com/khaneliman/neotest-nix/commit/8202f2642c40d7b820f766cf93da86b2e32ac15d))
+* **dev:** generate vimdoc from LuaCATS with vimcats ([944266c](https://github.com/khaneliman/neotest-nix/commit/944266c10ff18027395e8ef599b4a0312e23e390))
+* validate adapter config in checkhealth ([49a9c63](https://github.com/khaneliman/neotest-nix/commit/49a9c63e7c24e19da1f31fd6c12aae9516ad4cc4))
+* validate adapter config in setup() ([5f28fa5](https://github.com/khaneliman/neotest-nix/commit/5f28fa535af145fe220e66c0d1695b224f1a7c01))
+
+
+### Bug Fixes
+
+* make bare module a working adapter ([da8c684](https://github.com/khaneliman/neotest-nix/commit/da8c684ccd996bdd9f845fed124c1a033ac2fc8d))
+
 ## 1.0.0 (2026-05-29)
 
 
