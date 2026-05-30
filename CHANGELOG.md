@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.1.0](https://github.com/khaneliman/neotest-nix/compare/v2.0.0...v2.1.0) (2026-05-30)
+
+
+### Features
+
+* auto-detect the flake output for wrapped nix-unit suites ([5d13b3a](https://github.com/khaneliman/neotest-nix/commit/5d13b3a0945b434a269658acbb12d548ce6325cb))
+* run wrapped nix-unit suites via flake with per-attribute results ([272f383](https://github.com/khaneliman/neotest-nix/commit/272f38308526e26dbdf89493f622aa8686fb3375))
+
+
+### Bug Fixes
+
+* discover nix-unit files in test-named directories ([3177910](https://github.com/khaneliman/neotest-nix/commit/31779105dce13d471aedf415d96b6c3a2256cc64))
+
 ## [2.0.0](https://github.com/khaneliman/neotest-nix/compare/v1.0.0...v2.0.0) (2026-05-30)
 
 
