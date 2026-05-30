@@ -27,8 +27,11 @@ Neovim's runtime, and it exposes no user commands.
 
 The Lua modules are deliberately small and single-purpose:
 
-- `init.lua` — adapter entry point, tree-sitter position building, optional
-  `nix eval` discovery.
+- `init.lua` — adapter entry point; wires the modules together and exposes the
+  Neotest hooks (`root`, `is_test_file`, `build_spec`, `results`, …) plus
+  `setup`.
+- `positions.lua` — tree-sitter query loading and position building.
+- `eval.lua` — optional `nix eval` discovery of generated flake outputs.
 - `discover.lua` — root detection and "is this a test file?" rules.
 - `spec.lua` — turns a position into a `nix` / `nix build` / `nix-unit` run
   command.
