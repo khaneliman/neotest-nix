@@ -7,14 +7,8 @@ local spec = require("neotest-nix.spec")
 
 local M = {}
 
----@class neotest-nix.EvalOutput
----@field attr string Flake output to enumerate per system (e.g. "checks", "legacyPackages").
----@field match? string Lua pattern; only attribute names matching it are kept.
-
----@class neotest-nix.Config
----@field parser_runtime_paths? string[] Extra runtimepath roots containing parser/nix.so.
----@field discover_eval_checks? boolean Evaluate the flake to discover generated outputs.
----@field eval_outputs? neotest-nix.EvalOutput[] Outputs to enumerate (defaults to checks).
+-- The public config types (neotest-nix.Config / neotest-nix.EvalOutput) are
+-- defined in lua/neotest-nix/types.lua; this module references them by name.
 
 -- Active configuration. The module table itself is the Neotest adapter (see
 -- neotest-haskell), so `setup`/`__call` mutate this shared state and return M.
