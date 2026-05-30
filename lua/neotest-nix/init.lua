@@ -20,8 +20,15 @@ M.name = "neotest-nix"
 M.root = discover.root
 M.is_test_file = discover.is_test_file
 M.filter_dir = discover.filter_dir
-M.build_spec = spec.build_spec
 M.results = results.results
+
+---Build a run spec for the given position, threading the active configuration
+---through so the wrapping-check fallback (`nix_unit_checks`) is honoured.
+---@param args neotest.RunArgs
+---@return neotest.RunSpec?
+function M.build_spec(args)
+  return spec.build_spec(args, M._opts)
+end
 
 -- Re-exported on the module table so neotest's tree-sitter pass can reach the
 -- position builder via `require("neotest-nix")._build_position`, and so the
@@ -66,11 +73,19 @@ local function validate(opts)
   vim.validate("parser_runtime_paths", opts.parser_runtime_paths, "table", true)
   vim.validate("discover_eval_checks", opts.discover_eval_checks, "boolean", true)
   vim.validate("eval_outputs", opts.eval_outputs, "table", true)
+  vim.validate("nix_unit_flakes", opts.nix_unit_flakes, "table", true)
 
   if opts.eval_outputs ~= nil then
     for index, output in ipairs(opts.eval_outputs) do
       vim.validate(("eval_outputs[%d].attr"):format(index), output.attr, "string")
       vim.validate(("eval_outputs[%d].match"):format(index), output.match, "string", true)
+    end
+  end
+
+  if opts.nix_unit_flakes ~= nil then
+    for index, entry in ipairs(opts.nix_unit_flakes) do
+      vim.validate(("nix_unit_flakes[%d].path"):format(index), entry.path, "string")
+      vim.validate(("nix_unit_flakes[%d].flake"):format(index), entry.flake, "string")
     end
   end
 end

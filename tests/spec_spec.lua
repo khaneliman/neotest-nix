@@ -147,6 +147,68 @@ describe("spec", function()
     assert.are.equal("nested.testNested", run.context.attr)
   end)
 
+  it("runs wrapped nix-unit tests via the configured flake installable", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "lib", "tests", "default.nix")
+    local opts = { nix_unit_flakes = { { path = "lib/tests", flake = ".#tests" } } }
+    ---@type any
+    local run_args = {
+      tree = node({
+        attr_path = "testWrapped",
+        id = "testWrapped",
+        name = "testWrapped",
+        nix_unit_kind = nil,
+        path = path,
+        runner = "nix-unit",
+        type = "test",
+      }),
+    }
+
+    ---@type any
+    local run = spec.build_spec(run_args, opts)
+
+    assert.is_not_nil(run)
+    assert.same({
+      "nix-unit",
+      "--extra-experimental-features",
+      "flakes",
+      "--flake",
+      ".#tests",
+    }, run.command)
+    assert.are.equal(".#tests", run.context.attr)
+    assert.are.equal("nix-unit", run.context.runner)
+    -- nix-unit results are parsed in full at the end, so no incremental stream.
+    assert.is_nil(run.stream)
+  end)
+
+  it("runs a wrapped nix-unit file position via its flake installable", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "lib", "tests", "default.nix")
+    local opts = { nix_unit_flakes = { { path = "lib/tests", flake = ".#tests" } } }
+    ---@type any
+    local run_args = {
+      tree = node({
+        id = "file",
+        name = "default.nix",
+        path = path,
+        type = "file",
+      }),
+    }
+
+    ---@type any
+    local run = spec.build_spec(run_args, opts)
+
+    assert.is_not_nil(run)
+    assert.same({
+      "nix-unit",
+      "--extra-experimental-features",
+      "flakes",
+      "--flake",
+      ".#tests",
+    }, run.command)
+    assert.are.equal("nix-unit", run.context.runner)
+  end)
+
   it("skips unreachable nix-unit tests with a warning", function()
     local root = project()
     local notify = vim.notify

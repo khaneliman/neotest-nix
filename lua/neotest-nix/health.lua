@@ -22,6 +22,7 @@ local known_config_fields = {
   parser_runtime_paths = "table",
   discover_eval_checks = "boolean",
   eval_outputs = "table",
+  nix_unit_flakes = "table",
 }
 
 ---Inspect the active adapter configuration for typos and wrong-typed fields.
@@ -62,6 +63,21 @@ local function check_config()
       elseif output.match ~= nil and type(output.match) ~= "string" then
         valid = false
         health.error(("eval_outputs[%d].match must be a string"):format(index))
+      end
+    end
+  end
+
+  if type(opts.nix_unit_flakes) == "table" then
+    for index, entry in ipairs(opts.nix_unit_flakes) do
+      if
+        type(entry) ~= "table"
+        or type(entry.path) ~= "string"
+        or type(entry.flake) ~= "string"
+      then
+        valid = false
+        health.error(
+          ("nix_unit_flakes[%d] must be a table with string `path` and `flake`"):format(index)
+        )
       end
     end
   end

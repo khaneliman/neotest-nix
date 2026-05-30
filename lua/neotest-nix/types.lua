@@ -65,6 +65,7 @@
 ---      parser_runtime_paths = nil,
 ---      discover_eval_checks = false,
 ---      eval_outputs = { { attr = "checks" } },
+---      nix_unit_flakes = nil,
 ---    })
 ---<
 ---                                    *neotest-nix-config-parser_runtime_paths*
@@ -84,15 +85,27 @@
 ---    Which outputs to enumerate per system when `discover_eval_checks` is
 ---    enabled. Each entry is a |neotest-nix.EvalOutput|:
 ---    `{ attr = <output>, match = <lua pattern?> }`.
+---
+---                                         *neotest-nix-config-nix_unit_flakes*
+---`nix_unit_flakes`             `neotest-nix.NixUnitFlake[]?` (default `nil`)
+---    nix-unit tests defined in a function- or `let`-wrapped file (e.g.
+---    `{ self, lib }: { testFoo = ...; }`) cannot be evaluated standalone. If
+---    the flake exposes the applied attribute set as an output, map the file or
+---    its directory to that flake installable so runs go through
+---    `nix-unit --flake <flake>` and report per-attribute results: >lua
+---        nix_unit_flakes = { { path = "lib/tests", flake = ".#tests" } },
+---<
+---    `path` may be absolute or relative to the flake root, and matches the file
+---    itself or any directory containing it.
 ---@brief ]]
 
 ---@mod neotest-nix.discovery Discovery
 ---@brief [[
 ---  - `flake.nix` is always treated as a test file.
----  - Any other `*.nix` file is a test file only when its name contains `test`
----    AND it contains a nix-unit assertion (`expr` plus `expected` or
----    `expectedError`). A `default.nix` or `lib.nix` holding nix-unit tests is
----    not discovered unless renamed to match.
+---  - Any other `*.nix` file is a test file only when its name OR its immediate
+---    parent directory contains `test` AND it contains a nix-unit assertion
+---    (`expr` plus `expected` or `expectedError`). This covers both
+---    `foo_test.nix` and the common `tests/default.nix` layout.
 ---  - Positions are parsed from source with tree-sitter. When
 ---    `discover_eval_checks` is enabled, flake outputs are additionally
 ---    enumerated via `nix eval` and merged into the tree, so checks generated at
@@ -119,10 +132,18 @@ local M = {}
 ---@field attr string Flake output to enumerate (e.g. "checks").
 ---@field match? string Lua pattern filtering attribute names.
 
+---Maps a function/let-wrapped nix-unit file (or directory) to the flake
+---installable that exposes its applied test attribute set, so the adapter can
+---run it with `nix-unit --flake <flake>`. See |neotest-nix.configuration|.
+---@class neotest-nix.NixUnitFlake
+---@field path string File or directory holding the tests (absolute, or relative to the flake root).
+---@field flake string Flake installable passed to `nix-unit --flake` (e.g. ".#tests").
+
 ---Adapter configuration. Every field is optional; see |neotest-nix.configuration|.
 ---@class neotest-nix.Config
 ---@field parser_runtime_paths? string[] Extra runtimepath roots containing parser/nix.so.
 ---@field discover_eval_checks? boolean Evaluate the flake to discover generated outputs.
 ---@field eval_outputs? neotest-nix.EvalOutput[] Outputs to enumerate when discovery is on.
+---@field nix_unit_flakes? neotest-nix.NixUnitFlake[] Run wrapped nix-unit suites via a flake installable.
 
 return M

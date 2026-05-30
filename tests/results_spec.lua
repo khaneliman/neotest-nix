@@ -364,3 +364,94 @@ describe("results", function()
     assert.is_nil(stream())
   end)
 end)
+
+describe("nix-unit results", function()
+  local function unit_tree(root)
+    local file_path = vim.fs.joinpath(root, "lib", "tests", "default.nix")
+    local function leaf(name)
+      return Tree:new({
+        id = name,
+        name = name,
+        path = file_path,
+        range = { 0, 0, 3, 0 },
+        type = "test",
+      })
+    end
+
+    return Tree:new({
+      id = file_path,
+      name = "default.nix",
+      path = file_path,
+      type = "file",
+    }, { leaf("testPass"), leaf("testFail"), leaf("testFailEval") })
+  end
+
+  -- Mirrors the per-attribute output documented by nix-unit.
+  local sample = {
+    "\u{274C} testFail",
+    "{ x = 1; } != { y = 1; }",
+    "",
+    "\u{2622}\u{FE0F} testFailEval",
+    "error:",
+    "       … while calling the 'throw' builtin",
+    "",
+    "       error: NO U",
+    "",
+    "\u{2705} testPass",
+    "",
+    "\u{1F622} 1/3 successful",
+    "error: Tests failed",
+  }
+
+  it("parses each attribute's status and detail", function()
+    local entries = results.parse_nix_unit(table.concat(sample, "\n"))
+
+    local by_name = {}
+    for _, entry in ipairs(entries) do
+      by_name[entry.name] = entry
+    end
+
+    assert.are.equal("passed", by_name.testPass.status)
+    assert.are.equal("failed", by_name.testFail.status)
+    assert.are.equal("failed", by_name.testFailEval.status)
+    assert.are.equal("{ x = 1; } != { y = 1; }", by_name.testFail.message)
+    -- the eval-error block is captured whole, blank lines and all
+    assert.is_truthy(by_name.testFailEval.message:match("error: NO U"))
+  end)
+
+  it("maps per-attribute results onto their positions", function()
+    local root = project()
+    local position_tree = unit_tree(root)
+    local parsed = results.results(
+      run_spec(root, { runner = "nix-unit" }),
+      { code = 1, output = output_file(sample) },
+      position_tree
+    )
+
+    assert.are.equal("passed", parsed.testPass.status)
+    assert.are.equal("failed", parsed.testFail.status)
+    assert.are.equal("failed", parsed.testFailEval.status)
+    assert.are.equal("{ x = 1; } != { y = 1; }", parsed.testFail.errors[1].message)
+    -- the suite node reflects the overall failure
+    assert.are.equal("failed", parsed[position_tree:data().id].status)
+  end)
+
+  it("marks every attribute passed when the suite succeeds", function()
+    local root = project()
+    local position_tree = unit_tree(root)
+    local parsed = results.results(run_spec(root, { runner = "nix-unit" }), {
+      code = 0,
+      output = output_file({
+        "\u{2705} testPass",
+        "\u{2705} testFail",
+        "\u{2705} testFailEval",
+        "",
+        "\u{1F389} 3/3 successful",
+      }),
+    }, position_tree)
+
+    assert.are.equal("passed", parsed.testPass.status)
+    assert.are.equal("passed", parsed.testFail.status)
+    assert.are.equal("passed", parsed[position_tree:data().id].status)
+  end)
+end)

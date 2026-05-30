@@ -94,6 +94,73 @@ function M.parse_errors(output, root)
   return errors
 end
 
+-- nix-unit prints one line per test attribute, prefixed with a status glyph,
+-- followed by an optional detail block (a value diff or an evaluation error)
+-- that runs until the next attribute or the summary line.
+local nix_unit_markers = {
+  ["\u{2705}"] = "passed", -- ✅
+  ["\u{274C}"] = "failed", -- ❌
+  ["\u{2622}"] = "failed", -- ☢ (radioactive sign, optionally + variation selector)
+}
+
+---@param line string
+---@return ("passed"|"failed")?, string?
+local function nix_unit_marker(line)
+  for glyph, status in pairs(nix_unit_markers) do
+    if vim.startswith(line, glyph) then
+      -- Skip the glyph (and any trailing variation selector) and read the name.
+      local name = line:sub(#glyph + 1):match("[%w_%.'%-]+")
+      return status, name
+    end
+  end
+  return nil, nil
+end
+
+---@param line string
+---@return boolean
+local function nix_unit_summary(line)
+  -- e.g. "🎉 3/3 successful", "😢 1/3 successful", "error: Tests failed".
+  return line:match("%d+/%d+ successful") ~= nil or line:match("^error: Tests failed") ~= nil
+end
+
+---@class neotest-nix.NixUnitEntry
+---@field name string
+---@field status "passed"|"failed"
+---@field message string
+
+---Parse nix-unit's per-attribute output. Works on both passing (exit 0) and
+---failing (exit 1) runs, since nix-unit reports every attribute either way.
+---@param output string
+---@return neotest-nix.NixUnitEntry[]
+function M.parse_nix_unit(output)
+  local entries = {}
+  ---@type { name: string, status: "passed"|"failed", lines: string[] }?
+  local current
+
+  local function flush()
+    if current ~= nil then
+      local message = vim.trim(table.concat(current.lines, "\n"))
+      table.insert(entries, { name = current.name, status = current.status, message = message })
+      current = nil
+    end
+  end
+
+  for line in (output .. "\n"):gmatch("(.-)\n") do
+    local status, name = nix_unit_marker(line)
+    if status ~= nil and name ~= nil then
+      flush()
+      current = { name = name, status = status, lines = {} }
+    elseif nix_unit_summary(line) then
+      flush()
+    elseif current ~= nil then
+      table.insert(current.lines, line)
+    end
+  end
+  flush()
+
+  return entries
+end
+
 ---@param tree neotest.Tree
 ---@return neotest.Position[]
 local function test_positions(tree)
@@ -233,6 +300,60 @@ local function add_vm_tracebacks(results, target, output, start_at)
   return #tracebacks
 end
 
+---Build results for a nix-unit run from its per-attribute output. Each test
+---attribute is mapped to its position by name; the run's own node carries the
+---overall verdict so file/suite runs still report a status.
+---@param tree neotest.Tree
+---@param output string
+---@param code integer
+---@return table<string, neotest.Result>
+local function nix_unit_results(tree, output, code)
+  local entries = M.parse_nix_unit(output)
+  local root_id = tree:data().id
+
+  if #entries == 0 then
+    -- No per-attribute lines (e.g. a top-level eval error before any test ran).
+    if code == 0 then
+      return { [root_id] = { status = "passed", short = output } }
+    end
+    return { [root_id] = { status = "failed", short = error_message(output), errors = {} } }
+  end
+
+  local by_name = {}
+  for _, position in ipairs(test_positions(tree)) do
+    by_name[position.name] = position
+  end
+
+  local results = {}
+  local any_failed = false
+  for _, entry in ipairs(entries) do
+    if entry.status ~= "passed" then
+      any_failed = true
+    end
+
+    local position = by_name[entry.name]
+    if position ~= nil then
+      if entry.status == "passed" then
+        results[position.id] = { status = "passed", short = entry.message }
+      else
+        results[position.id] = {
+          status = "failed",
+          short = entry.message,
+          errors = {
+            { message = entry.message ~= "" and entry.message or (entry.name .. " failed") },
+          },
+        }
+      end
+    end
+  end
+
+  if results[root_id] == nil then
+    results[root_id] = { status = any_failed and "failed" or "passed", short = output }
+  end
+
+  return results
+end
+
 ---@param spec neotest.RunSpec
 ---@param result neotest.StrategyResult
 ---@param tree neotest.Tree
@@ -241,6 +362,10 @@ function M.results(spec, result, tree)
   local root = spec.cwd or uv.cwd() or "."
   local output = read_file(result.output) or result.output or ""
   output = paths.translate_string(output, root)
+
+  if spec.context ~= nil and spec.context.runner == "nix-unit" then
+    return nix_unit_results(tree, output, result.code)
+  end
 
   if result.code == 0 then
     return {

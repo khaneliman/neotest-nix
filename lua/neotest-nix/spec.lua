@@ -96,6 +96,48 @@ local function nix_unit_expr(attr, kind, path)
   return ("{ %s = %s.%s; }"):format(name, root, attr)
 end
 
+---Find the configured flake installable for a nix-unit file that cannot be
+---evaluated standalone (function/let-wrapped). Config paths may be absolute or
+---relative to the flake root, and match the file itself or any directory
+---containing it.
+---@param opts neotest-nix.Config
+---@param file_path string
+---@param root string
+---@return neotest-nix.NixUnitFlake?
+local function matching_flake(opts, file_path, root)
+  local flakes = opts and opts.nix_unit_flakes
+  if flakes == nil then
+    return nil
+  end
+
+  local target = vim.fs.normalize(file_path)
+  for _, entry in ipairs(flakes) do
+    local base = entry.path
+    if base:sub(1, 1) ~= "/" then
+      base = vim.fs.joinpath(root, base)
+    end
+    base = vim.fs.normalize(base)
+    if target == base or target:sub(1, #base + 1) == base .. "/" then
+      return entry
+    end
+  end
+
+  return nil
+end
+
+---Run nix-unit directly against a flake installable. Unlike building the
+---wrapping check, this prints per-attribute results to stdout so individual
+---test attributes can pass or fail independently.
+---@param flake string
+---@return string[]
+local function nix_unit_flake_command(flake)
+  local command = { "nix-unit" }
+  vim.list_extend(command, nix_unit_features)
+  table.insert(command, "--flake")
+  table.insert(command, flake)
+  return command
+end
+
 ---@param path string
 ---@return string
 local function cwd_for(path)
@@ -103,8 +145,10 @@ local function cwd_for(path)
 end
 
 ---@param args neotest.RunArgs
+---@param opts neotest-nix.Config?
 ---@return neotest.RunSpec?
-function M.build_spec(args)
+function M.build_spec(args, opts)
+  opts = opts or {}
   local tree = args and args.tree
   if tree == nil then
     return nil
@@ -119,27 +163,47 @@ function M.build_spec(args)
   local cwd = cwd_for(position.path)
   local attr = check_attr(tree)
   local command
+  local context_attr = attr
+  -- Set when the run delegates to `nix-unit --flake`, so results parse the
+  -- whole suite's per-attribute output regardless of which node was run.
+  local runner = position.runner or "nix"
 
-  if attr == nil then
-    command = {
-      "nix",
-      "flake",
-      "check",
-    }
-    vim.list_extend(command, nix_features)
-    table.insert(command, "--keep-going")
-  elseif position.runner == "nix-unit" then
-    if position.nix_unit_kind == nil then
+  if position.runner == "nix-unit" and position.nix_unit_kind == nil then
+    -- Function/let-wrapped nix-unit suite: not evaluable standalone. Run it via
+    -- the configured flake installable when mapped; otherwise warn.
+    local flake = matching_flake(opts, position.path, cwd)
+    if flake == nil then
       vim.notify(
         (
           "neotest-nix: nix-unit tests in %s are not reachable from the flake root; "
-          .. "run their wrapping check instead (e.g. nix build .#checks.<system>.<name>)"
+          .. "expose them as a flake output and map it with the `nix_unit_flakes` "
+          .. "option (e.g. { path = ..., flake = '.#tests' })"
         ):format(position.path),
         vim.log.levels.WARN
       )
       return nil
     end
 
+    command = nix_unit_flake_command(flake.flake)
+    context_attr = flake.flake
+  elseif attr == nil then
+    -- File position. A mapped flake runs only this suite via nix-unit;
+    -- otherwise fall back to a full `nix flake check`.
+    local flake = matching_flake(opts, position.path, cwd)
+    if flake ~= nil then
+      command = nix_unit_flake_command(flake.flake)
+      context_attr = flake.flake
+      runner = "nix-unit"
+    else
+      command = {
+        "nix",
+        "flake",
+        "check",
+      }
+      vim.list_extend(command, nix_features)
+      table.insert(command, "--keep-going")
+    end
+  elseif position.runner == "nix-unit" then
     command = {
       "nix-unit",
     }
@@ -161,14 +225,18 @@ function M.build_spec(args)
     cwd = cwd,
     strategy = process.strategy,
     context = {
-      attr = attr,
+      attr = context_attr,
       path = position.path,
       pos_id = position.id,
-      runner = position.runner or "nix",
+      runner = runner,
       type = position.type,
     },
   }
-  run_spec.stream = results.stream(run_spec, tree)
+  -- nix-unit reports per-attribute results that the final pass parses in full;
+  -- the streaming nix-error scanner only applies to plain `nix` runs.
+  if runner ~= "nix-unit" then
+    run_spec.stream = results.stream(run_spec, tree)
+  end
 
   return run_spec
 end
