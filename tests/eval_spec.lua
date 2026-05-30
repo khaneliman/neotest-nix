@@ -85,8 +85,9 @@ describe("eval output merge", function()
     assert.are.equal("parseLix", parse.name)
     assert.is_not_nil(tests["checks.x86_64-linux.treefmt"])
 
-    -- positions are keyed by id for results/build_spec lookup
-    assert.is_not_nil(merged:get_key("checks.x86_64-linux.parseLix"))
+    -- positions are keyed by a file-qualified id (so sibling flake.nix files
+    -- do not collide) for results/build_spec lookup
+    assert.is_not_nil(merged:get_key("/p/flake.nix::neotest-nix:eval:checks.x86_64-linux.parseLix"))
   end)
 
   it("nests generated checks under checks -> system namespaces", function()
@@ -142,6 +143,32 @@ describe("eval output merge", function()
 
     assert.are.equal(1, count)
     assert.is_not_nil(tests_by_attr(merged)["checks.x86_64-linux.extra"])
+  end)
+
+  it("qualifies injected ids by file so sibling flakes do not collide", function()
+    local function file_tree_at(path)
+      return Tree.from_list({
+        { id = path, name = "flake.nix", path = path, type = "file", range = { 0, 0, 10, 0 } },
+      }, get_id)
+    end
+
+    local function ids(tree)
+      local set = {}
+      for _, position in tree:iter() do
+        set[position.id] = true
+      end
+      return set
+    end
+
+    local a =
+      adapter._merge_eval_outputs(file_tree_at("/a/flake.nix"), "x86_64-linux", checks({ "unit" }))
+    local b =
+      adapter._merge_eval_outputs(file_tree_at("/b/flake.nix"), "x86_64-linux", checks({ "unit" }))
+
+    local b_ids = ids(b)
+    for id in pairs(ids(a)) do
+      assert.is_nil(b_ids[id])
+    end
   end)
 
   it("returns the original tree when nothing new is discovered", function()

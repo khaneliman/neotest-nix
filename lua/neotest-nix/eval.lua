@@ -179,6 +179,19 @@ function M.merge_outputs(tree, system, outputs)
   end
 
   local file_path = tree:data().path
+
+  -- Injected positions must carry ids unique to this file. neotest applies a
+  -- result to every position sharing the result's id across all discovered
+  -- trees, so a path-less id (e.g. "neotest-nix:eval:checks") would collide
+  -- between sibling flake.nix files and mark the wrong flake's checks. Mirror
+  -- neotest's own `path::…` scheme, keeping the `neotest-nix:eval:` marker so
+  -- the synthetic nodes stay distinct from same-file source-parsed namespaces.
+  ---@param suffix string
+  ---@return string
+  local function eval_id(suffix)
+    return ("%s::neotest-nix:eval:%s"):format(file_path, suffix)
+  end
+
   local list = tree:to_list()
   local added = false
 
@@ -188,7 +201,7 @@ function M.merge_outputs(tree, system, outputs)
     ---@type table[]
     local system_child = {
       {
-        id = ("neotest-nix:eval:%s.%s"):format(attr, system),
+        id = eval_id(("%s.%s"):format(attr, system)),
         name = system,
         path = file_path,
         type = "namespace",
@@ -202,7 +215,7 @@ function M.merge_outputs(tree, system, outputs)
         existing[attr_path] = true
         table.insert(system_child, {
           {
-            id = attr_path,
+            id = eval_id(attr_path),
             name = name,
             path = file_path,
             type = "test",
@@ -219,7 +232,7 @@ function M.merge_outputs(tree, system, outputs)
       added = true
       table.insert(list, {
         {
-          id = ("neotest-nix:eval:%s"):format(attr),
+          id = eval_id(attr),
           name = attr,
           path = file_path,
           type = "namespace",
