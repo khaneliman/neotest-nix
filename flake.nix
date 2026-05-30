@@ -36,7 +36,7 @@
 
           neotest-nix = prev.vimUtils.buildVimPlugin {
             pname = name;
-            version = "2.0.0"; # x-release-please-version
+            version = "2.1.0"; # x-release-please-version
             # Allowlist only the files the plugin ships. maybeMissing entries
             # are picked up automatically if/when those runtime dirs are added.
             src = final.lib.fileset.toSource {
