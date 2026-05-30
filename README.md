@@ -35,7 +35,7 @@ It discovers two kinds of tests in a flake-based project and runs them in place:
 
 ## Requirements
 
-- Neovim >= 0.10
+- Neovim >= 0.11
 - [Nix](https://nixos.org/) with the `nix-command` and `flakes` features enabled
 - [`nix-unit`](https://github.com/nix-community/nix-unit) on `PATH` (only for
   nix-unit tests)

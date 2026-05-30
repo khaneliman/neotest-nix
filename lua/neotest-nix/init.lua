@@ -65,13 +65,31 @@ function M.discover_positions(file_path)
   return tree
 end
 
+---Validate user-supplied config, failing fast with the offending field path.
+---Uses the per-argument `vim.validate` signature (Neovim 0.11+).
+---@param opts neotest-nix.Config
+local function validate(opts)
+  vim.validate("parser_runtime_paths", opts.parser_runtime_paths, "table", true)
+  vim.validate("discover_eval_checks", opts.discover_eval_checks, "boolean", true)
+  vim.validate("eval_outputs", opts.eval_outputs, "table", true)
+
+  if opts.eval_outputs ~= nil then
+    for index, output in ipairs(opts.eval_outputs) do
+      vim.validate(("eval_outputs[%d].attr"):format(index), output.attr, "string")
+      vim.validate(("eval_outputs[%d].match"):format(index), output.match, "string", true)
+    end
+  end
+end
+
 ---Configure the adapter. Returns the adapter (the module table itself), so all
 ---of `require("neotest-nix")`, `require("neotest-nix")(opts)` and
 ---`require("neotest-nix").setup(opts)` yield the same working adapter.
 ---@param opts neotest-nix.Config?
 ---@return neotest.Adapter
 function M.setup(opts)
-  M._opts = opts or {}
+  opts = opts or {}
+  validate(opts)
+  M._opts = opts
   ---@diagnostic disable-next-line: return-type-mismatch
   return M
 end

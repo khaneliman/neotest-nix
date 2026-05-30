@@ -69,7 +69,7 @@ the `nix` tree-sitter grammar.
 
 ## Coding Standards
 
-- Target **Neovim >= 0.10** and prefer built-ins over external libraries:
+- Target **Neovim >= 0.11** and prefer built-ins over external libraries:
   `vim.system`, `vim.fs`, `vim.uv`, and `vim.treesitter`. The adapter does not
   depend on `plenary.nvim`.
 - Annotate module APIs, parameters, and configuration objects with

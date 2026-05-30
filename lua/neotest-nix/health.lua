@@ -20,10 +20,10 @@ end
 function M.check()
   health.start("neotest-nix")
 
-  if vim.fn.has("nvim-0.10") == 1 then
-    health.ok("Neovim >= 0.10")
+  if vim.fn.has("nvim-0.11") == 1 then
+    health.ok("Neovim >= 0.11")
   else
-    health.error("Neovim >= 0.10 is required")
+    health.error("Neovim >= 0.11 is required")
   end
 
   if has_plugin("neotest") then

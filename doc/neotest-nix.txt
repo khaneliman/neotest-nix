@@ -26,7 +26,7 @@ flake-based project and runs them in place:
 ==============================================================================
 2. REQUIREMENTS                                       *neotest-nix-requirements*
 
-  - Neovim >= 0.10
+  - Neovim >= 0.11
   - Nix with the `nix-command` and `flakes` features enabled
   - `nix-unit` on PATH (only for nix-unit tests)
   - Plugin dependencies: `neotest` and `nvim-nio`

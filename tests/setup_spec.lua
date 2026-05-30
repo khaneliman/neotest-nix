@@ -132,6 +132,48 @@ describe("adapter integrates with neotest", function()
   end)
 end)
 
+describe("config validation", function()
+  before_each(function()
+    package.loaded["neotest-nix"] = nil
+    vim.opt.runtimepath:prepend(vim.fn.getcwd())
+  end)
+
+  it("accepts a fully specified config", function()
+    local adapter = require("neotest-nix")
+    assert.has_no.errors(function()
+      adapter.setup({
+        parser_runtime_paths = { "/tmp/nix-parser" },
+        discover_eval_checks = true,
+        eval_outputs = { { attr = "checks", match = "^test" } },
+      })
+    end)
+  end)
+
+  it("rejects a non-boolean discover_eval_checks", function()
+    local adapter = require("neotest-nix")
+    assert.has_error(function()
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      adapter.setup({ discover_eval_checks = "yes" })
+    end)
+  end)
+
+  it("rejects a non-table eval_outputs", function()
+    local adapter = require("neotest-nix")
+    assert.has_error(function()
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      adapter.setup({ eval_outputs = "checks" })
+    end)
+  end)
+
+  it("rejects eval_outputs entries without an attr", function()
+    local adapter = require("neotest-nix")
+    assert.has_error(function()
+      ---@diagnostic disable-next-line: missing-fields
+      adapter.setup({ eval_outputs = { { match = "^test" } } })
+    end)
+  end)
+end)
+
 describe("config options reach discovery", function()
   local notify, system
 
