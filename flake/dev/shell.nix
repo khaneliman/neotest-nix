@@ -36,6 +36,7 @@
             nil
             nix-unit
             nixfmt
+            vimcats
           ]);
       };
     };

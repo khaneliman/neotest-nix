@@ -1,14 +1,125 @@
--- Public configuration types, defined in their own module so init.lua stays
--- code-only and references them by name. Nothing requires this at runtime;
--- lua-language-server still resolves the classes across the workspace.
+---@toc neotest-nix.contents
+
+---@mod neotest-nix A Neotest adapter for running Nix tests
+---@brief [[
+---
+---neotest-nix is a Neotest adapter for running Nix tests directly from Neovim.
+---It discovers two kinds of tests in a flake-based project and runs them in
+---place:
+---
+---  - Flake checks: `checks.<system>.<name>` derivations, including NixOS VM
+---    tests with a `testScript`. Run with `nix`.
+---  - nix-unit tests: attribute sets shaped `{ expr = ...; expected = ...; }`
+---    (or `expectedError`). Run with `nix-unit`.
+---
+---Run |:checkhealth| neotest-nix to verify your setup.
+---@brief ]]
+
+---@mod neotest-nix.requirements Requirements
+---@brief [[
+---  - Neovim >= 0.11
+---  - Nix with the `nix-command` and `flakes` features enabled
+---  - `nix-unit` on PATH (only for nix-unit tests)
+---  - Plugin dependencies: `neotest` and `nvim-nio`
+---  - The `nix` tree-sitter grammar on your runtimepath (a `parser/nix.so`).
+---    Positions are parsed through Neovim's built-in |vim.treesitter|, so any
+---    source of the grammar works.
+---@brief ]]
+
+---@mod neotest-nix.installation Installation
+---@brief [[
+---With lazy.nvim, register the adapter on Neotest: >lua
+---    {
+---      "nvim-neotest/neotest",
+---      dependencies = {
+---        "nvim-neotest/nvim-nio",
+---        "nvim-treesitter/nvim-treesitter",
+---        "khaneliman/neotest-nix",
+---      },
+---      opts = { adapters = { ["neotest-nix"] = {} } },
+---    }
+---<
+---Or configure Neotest directly: >lua
+---    require("neotest").setup({
+---      adapters = { require("neotest-nix") },
+---    })
+---<
+---The repository also ships an overlay exposing `vimPlugins.neotest-nix` for
+---Nix-based configurations.
+---@brief ]]
+
+---@mod neotest-nix.usage Usage
+---@brief [[
+---Open a `flake.nix` (or a `*.nix` file whose name contains `test` and which
+---holds nix-unit assertions) and use the standard Neotest commands: >lua
+---    require("neotest").run.run()                   -- nearest test
+---    require("neotest").run.run(vim.fn.expand("%")) -- whole file
+---    require("neotest").summary.toggle()            -- test tree
+---<
+---@brief ]]
+
+---@mod neotest-nix.configuration Configuration
+---@brief [[
+---All options are optional. Defaults shown: >lua
+---    require("neotest-nix")({
+---      parser_runtime_paths = nil,
+---      discover_eval_checks = false,
+---      eval_outputs = { { attr = "checks" } },
+---    })
+---<
+---                                    *neotest-nix-config-parser_runtime_paths*
+---`parser_runtime_paths`        `string[]?` (default `nil`)
+---    Extra runtimepath roots containing `parser/nix.so`, in case the nix
+---    tree-sitter grammar is not already on your runtimepath.
+---
+---                                    *neotest-nix-config-discover_eval_checks*
+---`discover_eval_checks`        `boolean?` (default `false`)
+---    Evaluate the flake to discover generated outputs that are not visible in
+---    the source (e.g. checks produced by a function). Off by default because it
+---    shells out to `nix eval`.
+---
+---                                            *neotest-nix-config-eval_outputs*
+---`eval_outputs`                `neotest-nix.EvalOutput[]?`
+---                              (default `{ { attr = "checks" } }`)
+---    Which outputs to enumerate per system when `discover_eval_checks` is
+---    enabled. Each entry is a |neotest-nix.EvalOutput|:
+---    `{ attr = <output>, match = <lua pattern?> }`.
+---@brief ]]
+
+---@mod neotest-nix.discovery Discovery
+---@brief [[
+---  - `flake.nix` is always treated as a test file.
+---  - Any other `*.nix` file is a test file only when its name contains `test`
+---    AND it contains a nix-unit assertion (`expr` plus `expected` or
+---    `expectedError`). A `default.nix` or `lib.nix` holding nix-unit tests is
+---    not discovered unless renamed to match.
+---  - Positions are parsed from source with tree-sitter. When
+---    `discover_eval_checks` is enabled, flake outputs are additionally
+---    enumerated via `nix eval` and merged into the tree, so checks generated at
+---    evaluation time still show up.
+---@brief ]]
+
+---@mod neotest-nix.health Health
+---@brief [[
+---Run |:checkhealth| neotest-nix to confirm the Neovim version, the `neotest`
+---and `nvim-nio` plugins, the `nix` and `nix-unit` executables, and the `nix`
+---tree-sitter grammar are all in place. It also reports unknown or wrong-typed
+---configuration keys.
+---@brief ]]
+
+-- Annotation-only module: nothing requires it at runtime. It is the single
+-- source vimcats compiles into doc/neotest-nix.txt (see CONTRIBUTING), and it
+-- defines the public config types that lua-language-server resolves across the
+-- workspace (init.lua references them by name).
 local M = {}
 
 ---A single flake output to enumerate per system during eval-based discovery.
+---See |neotest-nix.configuration| for details.
 ---@class neotest-nix.EvalOutput
 ---@field attr string Flake output to enumerate (e.g. "checks").
 ---@field match? string Lua pattern filtering attribute names.
 
----Adapter configuration. Every field is optional.
+---Adapter configuration. Every field is optional; see |neotest-nix.configuration|.
 ---@class neotest-nix.Config
 ---@field parser_runtime_paths? string[] Extra runtimepath roots containing parser/nix.so.
 ---@field discover_eval_checks? boolean Evaluate the flake to discover generated outputs.

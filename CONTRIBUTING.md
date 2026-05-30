@@ -40,6 +40,8 @@ The Lua modules are deliberately small and single-purpose:
 - `parser.lua` — ensures the `nix` tree-sitter grammar is on the runtimepath.
 - `paths.lua` — translates `/nix/store/...-source` paths back to the worktree.
 - `vm.lua` — parses NixOS VM test (Python) tracebacks.
+- `types.lua` — annotation-only module: LuaCATS for the public config types and
+  the user manual; the single source `vimcats` compiles into `doc/`.
 
 ## Development Environment
 
@@ -57,7 +59,8 @@ direnv allow
 ```
 
 The shell provides Neovim, the Lua test runner (`vusted`),
-`lua-language-server`, `nix-unit`, the formatters, and the linters.
+`lua-language-server`, `nix-unit`, `vimcats` (Vimdoc generation), the
+formatters, and the linters.
 
 ### Language Server Setup
 
@@ -90,6 +93,21 @@ vusted tests/
 Tests live in `tests/`, share `tests/minimal_init.lua`, and use the fixtures in
 `tests/fixtures/`. Please add or update a spec for any behavior change — the
 suite is the contract for discovery, run-spec building, and result parsing.
+
+## Documentation
+
+The Vimdoc at `doc/neotest-nix.txt` is generated from the LuaCATS annotations in
+`lua/neotest-nix/types.lua` with [`vimcats`](https://github.com/mrcjkb/vimcats);
+do not edit it by hand. Regenerate it from the repository root with:
+
+```sh
+nix run .#docgen
+```
+
+A `docgen` pre-commit hook runs the same generation and stages the result, so
+the Vimdoc lands in the same commit as the change that prompted it. The hook
+also runs in CI (via the pre-commit checks), where it fails if the committed
+`doc/neotest-nix.txt` is out of date.
 
 ## Checks
 

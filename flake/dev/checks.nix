@@ -60,6 +60,23 @@
             settings.configuration = luarc;
           };
           treefmt.enable = true;
+          # Regenerate doc/neotest-nix.txt from the LuaCATS annotations in
+          # types.lua and stage it, so the vimdoc lands in the same commit as
+          # the change. In CI this gates staleness: if the committed doc does
+          # not match the source, vimcats rewrites it and pre-commit fails.
+          docgen = {
+            enable = true;
+            name = "regenerate vimdoc (vimcats)";
+            entry = toString (
+              pkgs.writeShellScript "neotest-nix-docgen-hook" ''
+                set -eu
+                ${pkgs.vimcats}/bin/vimcats -a lua/neotest-nix/types.lua > doc/neotest-nix.txt
+                git add doc/neotest-nix.txt 2>/dev/null || true
+              ''
+            );
+            files = "^(lua/neotest-nix/types\\.lua|doc/neotest-nix\\.txt)$";
+            pass_filenames = false;
+          };
         };
       };
 

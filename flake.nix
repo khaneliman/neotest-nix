@@ -104,6 +104,18 @@
 
           packages.neotest-nix = pkgs.vimPlugins.neotest-nix;
           packages.default = config.packages.neotest-nix;
+
+          # Regenerate doc/neotest-nix.txt from the LuaCATS annotations in
+          # lua/neotest-nix/types.lua. `nix run .#docgen` from the repo root.
+          apps.docgen = {
+            type = "app";
+            meta.description = "Regenerate doc/neotest-nix.txt from LuaCATS annotations with vimcats";
+            program = toString (
+              pkgs.writeShellScript "neotest-nix-docgen" ''
+                exec ${pkgs.vimcats}/bin/vimcats -a lua/neotest-nix/types.lua > doc/neotest-nix.txt
+              ''
+            );
+          };
         };
 
       flake.overlays.default = plugin-overlay;
