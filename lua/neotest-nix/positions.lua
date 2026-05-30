@@ -1,5 +1,3 @@
----@diagnostic disable: undefined-field
-
 local spec = require("neotest-nix.spec")
 
 local M = {}
@@ -28,7 +26,7 @@ function M.query()
   return cached_query
 end
 
----@param node userdata
+---@param node TSNode
 ---@param source string
 ---@return string[]
 local function attrpath_parts(node, source)
@@ -43,9 +41,10 @@ local function attrpath_parts(node, source)
   return parts
 end
 
----@param node userdata
----@return userdata?
+---@param node TSNode
+---@return TSNode?
 local function containing_binding(node)
+  ---@type TSNode?
   local current = node
   while current ~= nil do
     if current:type() == "binding" then
@@ -57,21 +56,21 @@ local function containing_binding(node)
   return nil
 end
 
----@param binding userdata
----@return userdata?
+---@param binding TSNode
+---@return TSNode?
 local function binding_attrpath(binding)
   local attrpaths = binding:field("attrpath")
   return attrpaths and attrpaths[1] or nil
 end
 
----@param node userdata
----@return userdata?
+---@param node TSNode
+---@return TSNode?
 local function binding_expression(node)
   local expressions = node:field("expression")
   return expressions and expressions[1] or nil
 end
 
----@param binding userdata
+---@param binding TSNode
 ---@param source string
 ---@return string[]
 local function binding_attrpath_parts(binding, source)
@@ -79,11 +78,12 @@ local function binding_attrpath_parts(binding, source)
   return attrpath ~= nil and attrpath_parts(attrpath, source) or {}
 end
 
----@param binding userdata
+---@param binding TSNode
 ---@param source string
 ---@return string[]
 local function full_attrpath_parts(binding, source)
   local attrpaths = {}
+  ---@type TSNode?
   local current = binding
 
   while current ~= nil do
@@ -120,7 +120,7 @@ local function is_nix_unit_test(parts)
     and parts[#parts]:match(nix_unit_test_pattern) ~= nil
 end
 
----@param binding userdata
+---@param binding TSNode
 ---@param source string
 ---@return boolean
 local function is_nix_unit_value(binding, source)
@@ -134,6 +134,7 @@ local function is_nix_unit_value(binding, source)
 
   -- tree-sitter-nix wraps an attrset's bindings in a binding_set node, so
   -- the bindings are not direct children of the attrset_expression.
+  ---@param node TSNode
   local function inspect(node)
     for child in node:iter_children() do
       local kind = child:type()
@@ -160,7 +161,7 @@ end
 ---  "import" -> file's top-level expression is an attrset and the suite is
 ---              reached by plain attr indexing, so `import ./file` works
 ---  nil      -> wrapped in a function/let; not individually runnable
----@param binding userdata
+---@param binding TSNode
 ---@param file_path string
 ---@return "flake"|"import"|nil
 local function nix_unit_kind(binding, file_path)
@@ -195,7 +196,7 @@ local function nix_unit_kind(binding, file_path)
   return nil
 end
 
----@param binding userdata
+---@param binding TSNode
 ---@param source string
 ---@return boolean
 local function has_checks_ancestor(binding, source)
@@ -218,9 +219,9 @@ local function has_checks_ancestor(binding, source)
   return false
 end
 
----@param node userdata
----@param callback fun(node: userdata): userdata?
----@return userdata?
+---@param node TSNode
+---@param callback fun(node: TSNode): TSNode?
+---@return TSNode?
 local function find_descendant(node, callback)
   local found = callback(node)
   if found ~= nil then
@@ -237,7 +238,7 @@ local function find_descendant(node, callback)
   return nil
 end
 
----@param binding userdata
+---@param binding TSNode
 ---@param source string
 ---@return integer[]?
 local function test_script_range(binding, source)
@@ -264,7 +265,7 @@ end
 
 ---@param file_path string
 ---@param source string
----@param captured_nodes table<string, userdata>
+---@param captured_nodes table<string, TSNode>
 ---@return neotest.Position?
 function M.build_position(file_path, source, captured_nodes)
   local namespace_name = captured_nodes["namespace.name"]
