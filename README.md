@@ -184,6 +184,14 @@ Run the checks the way CI does:
 nix flake check --print-build-logs
 ```
 
+## Acknowledgements
+
+- [mrcjkb/neotest-haskell](https://github.com/mrcjkb/neotest-haskell) — used as
+  a reference for the overall Neotest adapter shape, module boundaries, and
+  integration patterns.
+- [nvim-neotest/neotest](https://github.com/nvim-neotest/neotest) — the test
+  framework this adapter plugs into.
+
 ## License
 
 [MIT](./LICENSE) © Austin Horstman
