@@ -151,3 +151,17 @@ describe("eval output merge", function()
     assert.are.equal(base, merged)
   end)
 end)
+
+describe("nix-unit flake detection", function()
+  local eval = require("neotest-nix.eval")
+
+  it("builds an expression that filters outputs by the suite's test names", function()
+    local expr = eval.nix_unit_flake_expr({ "testFoo", "testBar" })
+
+    -- names are embedded as JSON so nix-unit attribute names need no escaping
+    assert.is_truthy(expr:find('["testFoo","testBar"]', 1, true))
+    -- only outputs containing every test attribute qualify
+    assert.is_truthy(expr:find("builtins.all", 1, true))
+    assert.is_truthy(expr:find("builtins.getFlake", 1, true))
+  end)
+end)

@@ -138,6 +138,85 @@ local function nix_unit_flake_command(flake)
   return command
 end
 
+---Collect the nix-unit test attribute names reachable from a run tree. Used to
+---auto-detect the flake output that exposes a wrapped suite.
+---@param tree neotest.Tree
+---@return string[]
+local function suite_test_names(tree)
+  local names = {}
+  local seen = {}
+
+  local function add(position)
+    if position.type == "test" and position.name ~= nil and not seen[position.name] then
+      seen[position.name] = true
+      table.insert(names, position.name)
+    end
+  end
+
+  add(tree:data())
+  if type(tree.iter) == "function" then
+    for _, position in tree:iter() do
+      add(position)
+    end
+  end
+
+  return names
+end
+
+---Resolve the flake installable for a wrapped nix-unit suite: an explicit
+---`nix_unit_flakes` mapping wins, otherwise fall back to evaluating the flake
+---to auto-detect the matching output.
+---@param opts neotest-nix.Config
+---@param position neotest-nix.Position
+---@param tree neotest.Tree
+---@param root string
+---@return string?
+local function resolve_flake(opts, position, tree, root)
+  local configured = matching_flake(opts, position.path, root)
+  if configured ~= nil then
+    return configured.flake
+  end
+
+  return require("neotest-nix.eval").detect_nix_unit_flake(root, suite_test_names(tree))
+end
+
+---@param path string
+local function warn_unresolved_flake(path)
+  vim.notify(
+    (
+      "neotest-nix: could not resolve a flake output for the nix-unit tests in %s; "
+      .. "expose them as a flake output, or map it with the `nix_unit_flakes` "
+      .. "option (e.g. { path = ..., flake = '.#tests' })"
+    ):format(path),
+    vim.log.levels.WARN
+  )
+end
+
+---Whether a file position holds a nix-unit suite that is only reachable through
+---the flake (every nix-unit test is function/let-wrapped). flake.nix and
+---files with standalone-runnable tests are excluded.
+---@param tree neotest.Tree
+---@param file_path string
+---@return boolean
+local function wrapped_nix_unit_file(tree, file_path)
+  if vim.fs.basename(file_path) == "flake.nix" or type(tree.iter) ~= "function" then
+    return false
+  end
+
+  local has_nix_unit = false
+  for _, position in tree:iter() do
+    ---@cast position neotest-nix.Position
+    if position.type == "test" and position.runner == "nix-unit" then
+      if position.nix_unit_kind ~= nil then
+        return false
+      end
+      has_nix_unit = true
+    end
+  end
+
+  return has_nix_unit
+end
+
 ---@param path string
 ---@return string
 local function cwd_for(path)
@@ -169,40 +248,42 @@ function M.build_spec(args, opts)
   local runner = position.runner or "nix"
 
   if position.runner == "nix-unit" and position.nix_unit_kind == nil then
-    -- Function/let-wrapped nix-unit suite: not evaluable standalone. Run it via
-    -- the configured flake installable when mapped; otherwise warn.
-    local flake = matching_flake(opts, position.path, cwd)
+    -- Function/let-wrapped nix-unit suite: not evaluable standalone. Resolve the
+    -- flake installable (explicit mapping, else auto-detect); otherwise warn.
+    local flake = resolve_flake(opts, position, tree, cwd)
     if flake == nil then
-      vim.notify(
-        (
-          "neotest-nix: nix-unit tests in %s are not reachable from the flake root; "
-          .. "expose them as a flake output and map it with the `nix_unit_flakes` "
-          .. "option (e.g. { path = ..., flake = '.#tests' })"
-        ):format(position.path),
-        vim.log.levels.WARN
-      )
+      warn_unresolved_flake(position.path)
       return nil
     end
 
-    command = nix_unit_flake_command(flake.flake)
-    context_attr = flake.flake
-  elseif attr == nil then
-    -- File position. A mapped flake runs only this suite via nix-unit;
-    -- otherwise fall back to a full `nix flake check`.
-    local flake = matching_flake(opts, position.path, cwd)
-    if flake ~= nil then
-      command = nix_unit_flake_command(flake.flake)
-      context_attr = flake.flake
-      runner = "nix-unit"
-    else
-      command = {
-        "nix",
-        "flake",
-        "check",
-      }
-      vim.list_extend(command, nix_features)
-      table.insert(command, "--keep-going")
+    command = nix_unit_flake_command(flake)
+    context_attr = flake
+  elseif
+    attr == nil
+    and (
+      matching_flake(opts, position.path, cwd) ~= nil or wrapped_nix_unit_file(tree, position.path)
+    )
+  then
+    -- File holding a wrapped nix-unit suite: run the whole suite via its flake
+    -- output so every attribute reports independently. An explicit mapping is
+    -- honoured even when the tree can't be introspected for wrapped children.
+    local flake = resolve_flake(opts, position, tree, cwd)
+    if flake == nil then
+      warn_unresolved_flake(position.path)
+      return nil
     end
+
+    command = nix_unit_flake_command(flake)
+    context_attr = flake
+    runner = "nix-unit"
+  elseif attr == nil then
+    command = {
+      "nix",
+      "flake",
+      "check",
+    }
+    vim.list_extend(command, nix_features)
+    table.insert(command, "--keep-going")
   elseif position.runner == "nix-unit" then
     command = {
       "nix-unit",

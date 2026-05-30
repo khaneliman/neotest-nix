@@ -89,10 +89,13 @@
 ---                                         *neotest-nix-config-nix_unit_flakes*
 ---`nix_unit_flakes`             `neotest-nix.NixUnitFlake[]?` (default `nil`)
 ---    nix-unit tests defined in a function- or `let`-wrapped file (e.g.
----    `{ self, lib }: { testFoo = ...; }`) cannot be evaluated standalone. If
----    the flake exposes the applied attribute set as an output, map the file or
----    its directory to that flake installable so runs go through
----    `nix-unit --flake <flake>` and report per-attribute results: >lua
+---    `{ self, lib }: { testFoo = ...; }`) cannot be evaluated standalone, so
+---    they are run through their flake output with `nix-unit --flake <flake>`,
+---    which reports per-attribute results. The output is auto-detected by
+---    evaluating the flake and matching the suite's test names, so no
+---    configuration is usually needed. Set this only to override detection or
+---    when the suite lives somewhere detection cannot find (e.g. nested under a
+---    non-top-level output): >lua
 ---        nix_unit_flakes = { { path = "lib/tests", flake = ".#tests" } },
 ---<
 ---    `path` may be absolute or relative to the flake root, and matches the file

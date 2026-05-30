@@ -81,6 +81,85 @@ function M.eval_outputs(root, specs)
   return { system = system, outputs = outputs }
 end
 
+-- Discovered flake installables for wrapped nix-unit suites, keyed by flake
+-- root. Only successful lookups are cached, so a failed detection (e.g. a
+-- transient eval error) is retried on the next run.
+---@type table<string, string>
+local nix_unit_flake_cache = {}
+
+---Nix expression that returns the names of the flake's top-level outputs whose
+---attribute set contains every one of `test_names`. The applied nix-unit suite
+---(e.g. the `tests` output) is such a set; structural outputs like `packages`
+---or `checks` are not, and evaluation errors are swallowed per output.
+---@param test_names string[]
+---@return string
+function M.nix_unit_flake_expr(test_names)
+  local json = vim.json.encode(test_names)
+  return ([[
+let
+  flake = builtins.getFlake (toString ./. );
+  testNames = builtins.fromJSON ''%s'';
+  hasAll = v: builtins.isAttrs v && builtins.all (n: builtins.hasAttr n v) testNames;
+in
+  builtins.filter
+    (name: let r = builtins.tryEval flake.${name}; in r.success && hasAll r.value)
+    (builtins.attrNames flake)
+]]):format(json)
+end
+
+-- Conventional nix-unit flake output names, preferred when several match.
+local nix_unit_flake_preference = { "tests", "libTests", "unitTests" }
+
+---Detect the flake installable that exposes a wrapped nix-unit suite by
+---evaluating the flake and matching the suite's test attribute names. Returns
+---e.g. ".#tests", or nil when nothing matches.
+---@param root string
+---@param test_names string[]
+---@return string?
+function M.detect_nix_unit_flake(root, test_names)
+  if test_names == nil or #test_names == 0 then
+    return nil
+  end
+
+  if nix_unit_flake_cache[root] ~= nil then
+    return nix_unit_flake_cache[root]
+  end
+
+  local nio = require("nio")
+  -- --impure: getFlake refuses an unlocked local flake reference otherwise.
+  local command = { "nix", "eval", "--impure", "--json" }
+  vim.list_extend(command, nix_command_features)
+  vim.list_extend(command, { "--expr", M.nix_unit_flake_expr(test_names) })
+
+  local future = nio.control.future()
+  vim.system(command, { cwd = root, text = true }, function(result)
+    future.set(result)
+  end)
+  local result = future.wait()
+
+  if result.code ~= 0 or result.stdout == nil or result.stdout == "" then
+    return nil
+  end
+
+  local ok, names = pcall(vim.json.decode, result.stdout)
+  if not ok or type(names) ~= "table" or #names == 0 then
+    return nil
+  end
+
+  local chosen
+  for _, preferred in ipairs(nix_unit_flake_preference) do
+    if vim.tbl_contains(names, preferred) then
+      chosen = preferred
+      break
+    end
+  end
+  chosen = chosen or names[1]
+
+  local flake = ".#" .. chosen
+  nix_unit_flake_cache[root] = flake
+  return flake
+end
+
 ---Merge eval-discovered flake outputs into a source-parsed position tree.
 ---@param tree neotest.Tree
 ---@param system string
