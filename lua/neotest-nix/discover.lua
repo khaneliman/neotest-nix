@@ -87,7 +87,16 @@ function M.is_test_file(file_path)
     return true
   end
 
-  if filename:match("%.nix$") == nil or filename:lower():match("test") == nil then
+  if filename:match("%.nix$") == nil then
+    return false
+  end
+
+  -- A file qualifies as test-named when either the file itself or its
+  -- immediate parent directory is test-named (e.g. `tests/default.nix`).
+  local parent = vim.fs.basename(dirname(file_path))
+  if
+    filename:lower():match("test") == nil and (parent == nil or parent:lower():match("test") == nil)
+  then
     return false
   end
 

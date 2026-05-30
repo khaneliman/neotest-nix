@@ -47,6 +47,22 @@ describe("discover", function()
     assert.is_false(discover.is_test_file("/workspace/testdata.lua"))
   end)
 
+  it("matches nix-unit files under a test-named directory", function()
+    local nix_unit = { "{", "  testFoo = {", "    expr = 1;", "    expected = 1;", "  };", "}" }
+    local empty = { "{ }" }
+
+    local tests_dir = vim.fs.joinpath(tmp, "tests")
+    mkdir(tests_dir)
+    write_file(vim.fs.joinpath(tests_dir, "default.nix"), nix_unit)
+    write_file(vim.fs.joinpath(tests_dir, "fixtures.nix"), empty)
+
+    -- `tests/default.nix` is the common convention: the directory is
+    -- test-named even though the file is not.
+    assert.is_true(discover.is_test_file(vim.fs.joinpath(tests_dir, "default.nix")))
+    -- still gated by the nix-unit content check
+    assert.is_false(discover.is_test_file(vim.fs.joinpath(tests_dir, "fixtures.nix")))
+  end)
+
   it("filters store, git, and build output directories", function()
     assert.is_false(discover.filter_dir(".git", ".git", tmp))
     assert.is_false(discover.filter_dir("result", "result", tmp))
