@@ -488,6 +488,49 @@ describe("nix-unit results", function()
     assert.are.equal("failed", parsed[position_tree:data().id].status)
   end)
 
+  it("maps dotted nix-unit names onto nested positions by attr_path", function()
+    local root = project()
+    local file_path = vim.fs.joinpath(root, "flake.nix")
+    local position_tree = Tree:new({
+      id = file_path,
+      name = "tests",
+      path = file_path,
+      type = "namespace",
+    }, {
+      Tree:new({
+        attr_path = "tests.testTop",
+        id = "tests.testTop",
+        name = "testTop",
+        path = file_path,
+        range = { 0, 0, 0, 0 },
+        type = "test",
+      }),
+      Tree:new({
+        attr_path = "tests.nested.testInner",
+        id = "tests.nested.testInner",
+        name = "testInner",
+        path = file_path,
+        range = { 0, 0, 0, 0 },
+        type = "test",
+      }),
+    })
+
+    local parsed = results.results(run_spec(root, { runner = "nix-unit" }), {
+      code = 1,
+      output = output_file({
+        "\226\157\140 nested.testInner",
+        "1 != 2",
+        "",
+        "\226\156\133 testTop",
+        "",
+        "\240\159\152\162 1/2 successful",
+      }),
+    }, position_tree)
+
+    assert.are.equal("passed", parsed["tests.testTop"].status)
+    assert.are.equal("failed", parsed["tests.nested.testInner"].status)
+  end)
+
   it("marks every attribute passed when the suite succeeds", function()
     local root = project()
     local position_tree = unit_tree(root)

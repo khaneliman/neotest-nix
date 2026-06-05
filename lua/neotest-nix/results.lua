@@ -321,9 +321,27 @@ local function nix_unit_results(tree, output, code)
     return { [root_id] = { status = "failed", short = error_message(output), errors = {} } }
   end
 
-  local by_name = {}
-  for _, position in ipairs(test_positions(tree)) do
-    by_name[position.name] = position
+  local positions = test_positions(tree)
+
+  -- nix-unit names a nested test by its dotted path relative to the suite
+  -- (e.g. "nested.testInner"), while a position's name is the leaf attribute.
+  -- Prefer an exact leaf match, then fall back to an attr_path suffix.
+  ---@param name string
+  ---@return neotest.Position?
+  local function match_position(name)
+    for _, position in ipairs(positions) do
+      if position.name == name then
+        return position
+      end
+    end
+    for _, position in ipairs(positions) do
+      ---@cast position neotest-nix.Position
+      local attr_path = position.attr_path
+      if attr_path ~= nil and (attr_path == name or attr_path:sub(-(#name + 1)) == "." .. name) then
+        return position
+      end
+    end
+    return nil
   end
 
   local results = {}
@@ -333,7 +351,7 @@ local function nix_unit_results(tree, output, code)
       any_failed = true
     end
 
-    local position = by_name[entry.name]
+    local position = match_position(entry.name)
     if position ~= nil then
       if entry.status == "passed" then
         results[position.id] = { status = "passed", short = entry.message }
