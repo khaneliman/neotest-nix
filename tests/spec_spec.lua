@@ -296,6 +296,8 @@ describe("spec", function()
     assert.is_truthy(expr:find("builtins.getFlake", 1, true))
     assert.is_truthy(expr:find('["tests"]', 1, true))
     assert.is_truthy(expr:find('"testWrapped"', 1, true))
+    assert.is_truthy(expr:find("builtins.listToAttrs matches", 1, true))
+    assert.is_nil(expr:find("builtins.head", 1, true))
     assert.are.equal(".#tests", run.context.attr)
     assert.are.equal("nix-unit", run.context.runner)
     -- nix-unit results are parsed in full at the end, so no incremental stream.

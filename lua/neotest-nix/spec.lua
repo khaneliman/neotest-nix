@@ -119,27 +119,29 @@ let
   flake = builtins.getFlake (toString ./. );
   root = builtins.foldl' (acc: seg: acc.${seg}) flake (builtins.fromJSON ''%s'');
   name = builtins.fromJSON ''%s'';
-  find = set:
+  pathName = path: builtins.concatStringsSep "." path;
+  find = path: set:
     builtins.concatMap (
       n:
       let
+        valuePath = path ++ [ n ];
         r = builtins.tryEval (set.${n});
       in
       if !r.success then
         [ ]
       else if builtins.isAttrs r.value && builtins.hasAttr "expr" r.value then
-        (if n == name then [ r.value ] else [ ])
+        (if n == name then [ { name = pathName valuePath; value = r.value; } ] else [ ])
       else if builtins.isAttrs r.value then
-        find r.value
+        find valuePath r.value
       else
         [ ]
     ) (builtins.attrNames set);
-  matches = find root;
+  matches = find [ ] root;
 in
 if matches == [ ] then
   throw "neotest-nix: no nix-unit test named ${name}"
 else
-  { ${name} = builtins.head matches; }
+  builtins.listToAttrs matches
 ]]):format(path, name)
 end
 
