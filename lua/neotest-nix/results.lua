@@ -449,7 +449,7 @@ end
 
 ---@param spec neotest.RunSpec
 ---@param tree neotest.Tree
----@return fun(output_stream: fun(): string): fun(): table<string, neotest.Result>?
+---@return fun(output_stream: fun(): string?): fun(): table<string, neotest.Result>?
 function M.stream(spec, tree)
   return function(output_stream)
     local output = {}
@@ -460,13 +460,13 @@ function M.stream(spec, tree)
 
     return function()
       while true do
-        local line = output_stream()
-        if line == nil then
+        local chunk = output_stream()
+        if chunk == nil then
           return nil
         end
 
-        table.insert(output, line)
-        local text = table.concat(output, "\n")
+        table.insert(output, chunk)
+        local text = table.concat(output)
         local root = spec.cwd or uv.cwd() or "."
         local parsed_errors = M.parse_errors(text, root)
         local stream_results = {}

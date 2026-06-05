@@ -350,14 +350,14 @@ describe("results", function()
   it("streams Nix diagnostics as soon as source locations are available", function()
     local root = project()
     local position_tree = tree(root)
-    local lines = {
-      "error: assertion failed",
-      "       at /nix/store/abc123-source/checks/unit.nix:2:3:",
+    local chunks = {
+      "error: assertion failed\n       at /nix/store/abc123-source/checks/",
+      "unit.nix:2:3:",
     }
     local index = 0
     local stream = results.stream(run_spec(root), position_tree)(function()
       index = index + 1
-      return lines[index]
+      return chunks[index]
     end)
 
     local parsed = stream()
@@ -395,7 +395,7 @@ describe("results", function()
     local index = 0
     local stream = results.stream(run_spec(root), position_tree)(function()
       index = index + 1
-      return lines[index]
+      return index == 1 and table.concat(lines, "\n") or nil
     end)
 
     local parsed = stream()
