@@ -135,6 +135,31 @@ local function multi_vm_tree(root)
   })
 end
 
+local function multi_test_tree(root)
+  local file_path = vim.fs.joinpath(root, "checks", "unit.nix")
+  return Tree:new({
+    id = vim.fs.joinpath(root, "flake.nix"),
+    name = "flake.nix",
+    path = vim.fs.joinpath(root, "flake.nix"),
+    type = "file",
+  }, {
+    Tree:new({
+      id = "first",
+      name = "first",
+      path = file_path,
+      range = { 0, 0, 1, 0 },
+      type = "test",
+    }),
+    Tree:new({
+      id = "second",
+      name = "second",
+      path = file_path,
+      range = { 2, 0, 3, 0 },
+      type = "test",
+    }),
+  })
+end
+
 local function output_file(lines)
   local path = vim.fn.tempname()
   vim.fn.writefile(lines, path)
@@ -182,12 +207,39 @@ describe("results", function()
     }, parsed.unit.errors[1])
   end)
 
+  it("distributes errors across tests on a whole-file run", function()
+    local root = project()
+    local position_tree = multi_test_tree(root)
+    local parsed = results.results(
+      run_spec(root, {
+        pos_id = position_tree:data().id,
+        type = "file",
+      }),
+      {
+        code = 1,
+        output = output_file({
+          "error: assertion failed",
+          "       at /nix/store/abc123-source/checks/unit.nix:1:1:",
+          "       at /nix/store/abc123-source/checks/unit.nix:3:1:",
+        }),
+      },
+      position_tree
+    )
+
+    assert.are.equal("failed", parsed.first.status)
+    assert.are.equal(0, parsed.first.errors[1].line)
+    assert.are.equal("failed", parsed.second.status)
+    assert.are.equal(2, parsed.second.errors[1].line)
+    assert.is_nil(parsed[position_tree:data().id])
+  end)
+
   it("uses targeted run context when assigning errors", function()
     local root = project()
     local position_tree = tree(root)
     local parsed = results.results(
       run_spec(root, {
         pos_id = "unit",
+        type = "test",
       }),
       {
         code = 1,

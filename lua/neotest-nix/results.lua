@@ -213,7 +213,9 @@ end
 ---@return string
 local function result_id_for_error(tree, spec, error, positions)
   local context = spec.context or {}
-  if context.pos_id ~= nil and tree:get_key(context.pos_id) ~= nil then
+  -- Pin to the run node only for single-test runs; broader runs distribute
+  -- errors per position below instead of collapsing onto the covering node.
+  if context.type == "test" and context.pos_id ~= nil and tree:get_key(context.pos_id) ~= nil then
     return context.pos_id
   end
 
