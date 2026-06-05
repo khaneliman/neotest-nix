@@ -3,7 +3,6 @@ local spec = require("neotest-nix.spec")
 local M = {}
 
 local system_pattern = spec.system_pattern
-local nix_unit_test_pattern = "^test"
 
 ---@type string?
 local cached_query
@@ -114,10 +113,7 @@ end
 ---@param parts string[]
 ---@return boolean
 local function is_nix_unit_test(parts)
-  return #parts >= 1
-    and parts[1] ~= "checks"
-    and parts[#parts] ~= "tests"
-    and parts[#parts]:match(nix_unit_test_pattern) ~= nil
+  return #parts >= 1 and parts[1] ~= "checks" and parts[#parts] ~= "tests"
 end
 
 ---@param binding TSNode

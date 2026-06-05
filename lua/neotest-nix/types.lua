@@ -115,6 +115,9 @@
 ---    parent directory contains `test` AND it contains a nix-unit assertion
 ---    (`expr` plus `expected` or `expectedError`). This covers both
 ---    `foo_test.nix` and the common `tests/default.nix` layout.
+---  - nix-unit assertions are discovered when their value has nix-unit shape
+---    (`expr` plus `expected` or `expectedError`). Attribute names do not need
+---    a `test` prefix; `addition` and `testAddition` both appear.
 ---  - Positions are parsed from source with tree-sitter. When
 ---    `discover_eval_checks` is enabled, flake outputs are additionally
 ---    enumerated via `nix eval` and merged into the tree, so checks generated at
@@ -135,6 +138,11 @@
 ---  - Running a whole `flake.nix` that mixes checks and nix-unit tests runs
 ---    `nix flake check`, which does not execute nix-unit suites. Run the nix-unit
 ---    namespace (or an individual test) to exercise them.
+---  - Whole-suite runs use `nix-unit --flake`, which evaluates in pure mode and
+---    therefore needs a committed `flake.lock` with every input locked. On a
+---    flake whose inputs are not locked the run fails with `cannot update
+---    unlocked flake input`. Individual tests run via `--expr` and are not
+---    affected. Commit a lock file to run suites.
 ---@brief ]]
 
 ---@mod neotest-nix.health Health

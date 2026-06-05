@@ -150,6 +150,14 @@ require("neotest-nix")({
   -- Which outputs to enumerate when discover_eval_checks is enabled.
   -- Each entry is { attr = <output>, match = <lua pattern, optional> }.
   eval_outputs = { { attr = "checks" } },
+
+  -- Map function/`let`-wrapped nix-unit files (not evaluable standalone) to the
+  -- flake installable that exposes them, run with `nix-unit --flake <flake>`.
+  -- The output is auto-detected by evaluating the flake, so this is usually
+  -- unnecessary; set it only to override detection. `path` may be absolute or
+  -- relative to the flake root and matches the file or any directory above it.
+  -- nix_unit_flakes = { { path = "lib/tests", flake = ".#tests" } },
+  nix_unit_flakes = nil,
 })
 ```
 
@@ -158,14 +166,19 @@ require("neotest-nix")({
 | `parser_runtime_paths` | `string[]?` | `nil` | Extra runtimepath roots containing `parser/nix.so`. |
 | `discover_eval_checks` | `boolean?` | `false` | Evaluate the flake to discover outputs not present in the source. |
 | `eval_outputs` | `neotest-nix.EvalOutput[]?` | `{ { attr = "checks" } }` | Outputs to enumerate per system when `discover_eval_checks` is on. |
+| `nix_unit_flakes` | `neotest-nix.NixUnitFlake[]?` | `nil` | Map wrapped nix-unit files to a flake installable, overriding auto-detection. |
 
 ## How discovery works
 
 - `flake.nix` is always treated as a test file.
-- Any other `*.nix` file is considered a test file only when its name contains
-  `test` **and** it contains a nix-unit assertion (`expr` plus `expected` or
-  `expectedError`). A `default.nix` or `lib.nix` holding nix-unit tests is not
-  discovered unless it is renamed to match (e.g. `tests.nix`).
+- Any other `*.nix` file is considered a test file only when its name **or its
+  immediate parent directory** contains `test` **and** it contains a nix-unit
+  assertion (`expr` plus `expected` or `expectedError`). This covers both
+  `foo_test.nix` and the common `tests/default.nix` layout. A `lib.nix` holding
+  nix-unit tests outside a `test`-named file or directory is not discovered.
+- nix-unit assertions are surfaced as individual positions when their value has
+  nix-unit shape (`expr` plus `expected` or `expectedError`). Attribute names do
+  not need a `test` prefix; `addition` and `testAddition` both appear.
 - Positions are parsed from source with tree-sitter. When
   `discover_eval_checks` is enabled, flake outputs are additionally enumerated
   via `nix eval` and merged into the tree, so checks generated at evaluation
@@ -184,6 +197,10 @@ require("neotest-nix")({
 - Running a whole `flake.nix` that mixes checks and nix-unit tests runs
   `nix flake check`, which does not execute nix-unit suites. Run the nix-unit
   namespace (or an individual test) to exercise them.
+- Whole-suite runs use `nix-unit --flake`, which evaluates in pure mode and so
+  needs a committed `flake.lock` with every input locked; otherwise the run
+  fails with `cannot update unlocked flake input`. Individual tests run via
+  `--expr` and are unaffected.
 
 ## Contributing
 

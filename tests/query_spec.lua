@@ -55,7 +55,7 @@ describe("nix query", function()
       names_by_type(positions, "namespace")
     )
     assert.same(
-      { "integration", "testLibrary", "testPass", "unit", "vm" },
+      { "addition", "integration", "libraryCase", "testLibrary", "testPass", "unit", "vm" },
       names_by_type(positions, "test")
     )
   end)
@@ -74,25 +74,30 @@ describe("nix query", function()
     error("missing testPass position")
   end)
 
-  it("discovers nix-unit assertions under arbitrary flake suite names", function()
+  it("discovers nix-unit assertions under arbitrary suite and test names", function()
     local positions = parse_fixture()
 
     for _, position in ipairs(positions) do
       if position.name == "testLibrary" then
         assert.are.equal("nix-unit", position.runner)
         assert.are.equal("libTests.nested.testLibrary", position.attr_path)
-        return
+      elseif position.name == "libraryCase" then
+        assert.are.equal("nix-unit", position.runner)
+        assert.are.equal("libTests.nested.libraryCase", position.attr_path)
       end
     end
 
-    error("missing testLibrary position")
+    assert.is_not_nil(find_position(positions, "testLibrary"))
+    assert.is_not_nil(find_position(positions, "libraryCase"))
   end)
 
   it("marks flake.nix nix-unit suites as flake-reachable", function()
     local positions = parse_fixture()
 
     assert.are.equal("flake", find_position(positions, "testPass").nix_unit_kind)
+    assert.are.equal("flake", find_position(positions, "addition").nix_unit_kind)
     assert.are.equal("flake", find_position(positions, "testLibrary").nix_unit_kind)
+    assert.are.equal("flake", find_position(positions, "libraryCase").nix_unit_kind)
   end)
 
   it("marks bare-attrset nix-unit files as import-reachable", function()
@@ -103,9 +108,18 @@ describe("nix query", function()
     assert.are.equal("import", bare.nix_unit_kind)
     assert.are.equal("testBare", bare.attr_path)
 
+    local non_prefixed = find_position(positions, "bareCase")
+    assert.are.equal("nix-unit", non_prefixed.runner)
+    assert.are.equal("import", non_prefixed.nix_unit_kind)
+    assert.are.equal("bareCase", non_prefixed.attr_path)
+
     local nested = find_position(positions, "testNested")
     assert.are.equal("import", nested.nix_unit_kind)
     assert.are.equal("nested.testNested", nested.attr_path)
+
+    local nested_non_prefixed = find_position(positions, "nestedCase")
+    assert.are.equal("import", nested_non_prefixed.nix_unit_kind)
+    assert.are.equal("nested.nestedCase", nested_non_prefixed.attr_path)
   end)
 
   it("ignores test-prefixed attrs that are not nix-unit assertions", function()

@@ -31,6 +31,11 @@
           expr = 1;
           expected = 1;
         };
+
+        addition = {
+          expr = 1 + 1;
+          expected = 2;
+        };
       };
 
       libTests = {
@@ -38,6 +43,11 @@
           testLibrary = {
             expr = 1 + 1;
             expected = 2;
+          };
+
+          libraryCase = {
+            expr = "ok";
+            expected = "ok";
           };
         };
       };
