@@ -98,6 +98,29 @@ describe("spec", function()
     assert.are.equal("checks.aarch64-darwin.unit", run.context.attr)
   end)
 
+  it("lets neotest break system namespaces down into child checks", function()
+    local root = project()
+    local file = node({
+      id = "file",
+      name = "flake.nix",
+      path = vim.fs.joinpath(root, "flake.nix"),
+      type = "file",
+    })
+    local checks =
+      node({ id = "checks", name = "checks", path = file:data().path, type = "namespace" }, file)
+    local system = node({
+      id = "system",
+      name = "x86_64-linux",
+      path = file:data().path,
+      type = "namespace",
+    }, checks)
+
+    ---@type any
+    local run_args = { tree = system }
+
+    assert.is_nil(spec.build_spec(run_args))
+  end)
+
   it("builds a targeted nix-unit expression for flake nix-unit tests", function()
     local root = project()
     local test = node({

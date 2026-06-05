@@ -238,6 +238,9 @@ function M.build_spec(args, opts)
   if position.type == "dir" then
     return nil
   end
+  if position.type == "namespace" and position.name:match(M.system_pattern) ~= nil then
+    return nil
+  end
 
   local cwd = cwd_for(position.path)
   local attr = check_attr(tree)
