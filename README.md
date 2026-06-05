@@ -171,6 +171,20 @@ require("neotest-nix")({
   via `nix eval` and merged into the tree, so checks generated at evaluation
   time still show up.
 
+## Limitations
+
+- Tests are only discovered inside a flake project. With no `flake.nix` at or
+  above the file, the adapter does not apply.
+- nix-unit runners evaluate the flake with `builtins.getFlake`, which sees only
+  git-tracked files. A brand-new, untracked `flake.nix` or test file is
+  invisible until it is staged or committed.
+- Running a nix-unit suite (a `tests`-style namespace, or a function/`let`-wrapped
+  file) runs the whole suite via `nix-unit --flake`, since it has no
+  single-attribute filter — every attribute in that output reports a result.
+- Running a whole `flake.nix` that mixes checks and nix-unit tests runs
+  `nix flake check`, which does not execute nix-unit suites. Run the nix-unit
+  namespace (or an individual test) to exercise them.
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). Development happens inside the Nix
