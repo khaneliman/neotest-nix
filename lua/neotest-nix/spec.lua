@@ -224,6 +224,45 @@ local function wrapped_nix_unit_file(tree, file_path)
   return has_nix_unit
 end
 
+---The flake installable for a namespace whose subtree is entirely flake-level
+---nix-unit tests sharing one output (e.g. the `tests` namespace -> ".#tests").
+---Returns nil for mixed or non-nix-unit subtrees, which fall back to a broad
+---`nix flake check`.
+---@param tree neotest.Tree
+---@return string?
+local function namespace_nix_unit_flake(tree)
+  if type(tree.iter) ~= "function" then
+    return nil
+  end
+
+  local output
+  local count = 0
+  for _, position in tree:iter() do
+    ---@cast position neotest-nix.Position
+    if position.type == "test" then
+      if position.runner ~= "nix-unit" or position.nix_unit_kind ~= "flake" then
+        return nil
+      end
+      local segment = position.attr_path ~= nil and position.attr_path:match("^([^.]+)") or nil
+      if segment == nil then
+        return nil
+      end
+      if output == nil then
+        output = segment
+      elseif output ~= segment then
+        return nil
+      end
+      count = count + 1
+    end
+  end
+
+  if count == 0 then
+    return nil
+  end
+
+  return ".#" .. output
+end
+
 ---@param path string
 ---@return string
 local function cwd_for(path)
@@ -256,6 +295,9 @@ function M.build_spec(args, opts)
   -- Set when the run delegates to `nix-unit --flake`, so results parse the
   -- whole suite's per-attribute output regardless of which node was run.
   local runner = position.runner or "nix"
+  local namespace_flake = (attr == nil and position.type == "namespace")
+      and namespace_nix_unit_flake(tree)
+    or nil
 
   if position.runner == "nix-unit" and position.nix_unit_kind == nil then
     -- Function/let-wrapped nix-unit suite: not evaluable standalone. Resolve the
@@ -285,6 +327,10 @@ function M.build_spec(args, opts)
 
     command = nix_unit_flake_command(flake)
     context_attr = flake
+    runner = "nix-unit"
+  elseif namespace_flake ~= nil then
+    command = nix_unit_flake_command(namespace_flake)
+    context_attr = namespace_flake
     runner = "nix-unit"
   elseif attr == nil then
     command = {

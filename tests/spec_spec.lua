@@ -3,10 +3,11 @@ local spec = require("neotest-nix.spec")
 local Tree = {}
 Tree.__index = Tree
 
-function Tree:new(data, parent)
+function Tree:new(data, parent, children)
   return setmetatable({
     _data = data,
     _parent = parent,
+    _children = children or {},
   }, self)
 end
 
@@ -16,6 +17,22 @@ end
 
 function Tree:parent()
   return self._parent
+end
+
+function Tree:iter()
+  local nodes = { self._data }
+  for _, child in ipairs(self._children) do
+    table.insert(nodes, child._data)
+  end
+
+  local index = 0
+  return function()
+    index = index + 1
+    if nodes[index] == nil then
+      return nil
+    end
+    return index, nodes[index]
+  end
 end
 
 local function project()
@@ -119,6 +136,57 @@ describe("spec", function()
     local run_args = { tree = system }
 
     assert.is_nil(spec.build_spec(run_args))
+  end)
+
+  it("runs a flake nix-unit namespace via nix-unit --flake", function()
+    local root = project()
+    local file = node({
+      id = "file",
+      name = "flake.nix",
+      path = vim.fs.joinpath(root, "flake.nix"),
+      type = "file",
+    })
+    local tests = Tree:new(
+      {
+        id = "tests",
+        name = "tests",
+        path = file:data().path,
+        type = "namespace",
+      },
+      file,
+      {
+        Tree:new({
+          attr_path = "tests.testPass",
+          id = "tests.testPass",
+          name = "testPass",
+          nix_unit_kind = "flake",
+          path = file:data().path,
+          runner = "nix-unit",
+          type = "test",
+        }),
+        Tree:new({
+          attr_path = "tests.testOther",
+          id = "tests.testOther",
+          name = "testOther",
+          nix_unit_kind = "flake",
+          path = file:data().path,
+          runner = "nix-unit",
+          type = "test",
+        }),
+      }
+    )
+
+    local run = build_spec({ tree = tests })
+
+    assert.same({
+      "nix-unit",
+      "--extra-experimental-features",
+      "flakes",
+      "--flake",
+      ".#tests",
+    }, run.command)
+    assert.are.equal(".#tests", run.context.attr)
+    assert.are.equal("nix-unit", run.context.runner)
   end)
 
   it("builds a targeted nix-unit expression for flake nix-unit tests", function()
