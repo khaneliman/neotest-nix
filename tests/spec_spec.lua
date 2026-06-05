@@ -288,13 +288,14 @@ describe("spec", function()
     local run = spec.build_spec(run_args, opts)
 
     assert.is_not_nil(run)
-    assert.same({
-      "nix-unit",
-      "--extra-experimental-features",
-      "flakes",
-      "--flake",
-      ".#tests",
-    }, run.command)
+    -- A single wrapped test selects just its leaf out of the suite via --expr,
+    -- since nix-unit --flake cannot filter to one attribute.
+    assert.are.equal("nix-unit", run.command[1])
+    assert.are.equal("--expr", run.command[4])
+    local expr = run.command[5]
+    assert.is_truthy(expr:find("builtins.getFlake", 1, true))
+    assert.is_truthy(expr:find('["tests"]', 1, true))
+    assert.is_truthy(expr:find('"testWrapped"', 1, true))
     assert.are.equal(".#tests", run.context.attr)
     assert.are.equal("nix-unit", run.context.runner)
     -- nix-unit results are parsed in full at the end, so no incremental stream.
@@ -398,13 +399,8 @@ describe("spec", function()
     package.loaded["neotest-nix.eval"] = eval_module
 
     assert.is_not_nil(run)
-    assert.same({
-      "nix-unit",
-      "--extra-experimental-features",
-      "flakes",
-      "--flake",
-      ".#tests",
-    }, run.command)
+    assert.are.equal("--expr", run.command[4])
+    assert.is_truthy(run.command[5]:find('"testWrapped"', 1, true))
     assert.are.equal(".#tests", run.context.attr)
     assert.are.same({ "testWrapped" }, seen_names)
   end)

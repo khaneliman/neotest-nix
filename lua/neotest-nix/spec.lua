@@ -103,6 +103,39 @@ local function nix_unit_expr(attr, kind, path)
   return ("{ %s = %s.%s; }"):format(name, root, attr)
 end
 
+---Expression that runs a single test out of a wrapped flake suite. The suite's
+---runtime path (e.g. `tests.systems.<system>.system-agnostic.<name>`) differs
+---from the source position, so the leaf is located by name within the output
+---rather than indexed directly.
+---@param flake string installable such as ".#tests"
+---@param leaf string test attribute name
+---@return string
+local function nix_unit_select_expr(flake, leaf)
+  local output = flake:gsub("^%.#", "")
+  local path = vim.json.encode(vim.split(output, ".", { plain = true }))
+  local name = vim.json.encode(leaf)
+  return ([[
+let
+  flake = builtins.getFlake (toString ./. );
+  root = builtins.foldl' (acc: seg: acc.${seg}) flake (builtins.fromJSON ''%s'');
+  name = builtins.fromJSON ''%s'';
+  find = set:
+    builtins.concatMap (n:
+      let r = builtins.tryEval (set.${n}); in
+      if !r.success then []
+      else let v = r.value; in
+        if builtins.isAttrs v then
+          (if n == name && builtins.hasAttr "expr" v then [ v ]
+           else if builtins.hasAttr "expr" v then []
+           else find v)
+        else []) (builtins.attrNames set);
+  matches = find root;
+in
+  if matches == [ ] then throw "neotest-nix: no nix-unit test named ${name}"
+  else { ${name} = builtins.head matches; }
+]]):format(path, name)
+end
+
 ---Find the configured flake installable for a nix-unit file that cannot be
 ---evaluated standalone (function/let-wrapped). Config paths may be absolute or
 ---relative to the flake root, and match the file itself or any directory
@@ -300,15 +333,22 @@ function M.build_spec(args, opts)
     or nil
 
   if position.runner == "nix-unit" and position.nix_unit_kind == nil then
-    -- Function/let-wrapped nix-unit suite: not evaluable standalone. Resolve the
+    -- Function/let-wrapped nix-unit test: not evaluable standalone. Resolve the
     -- flake installable (explicit mapping, else auto-detect); otherwise warn.
+    -- `nix-unit --flake` has no per-attribute filter, so a single test is run
+    -- by selecting just its leaf out of the suite via `--expr`.
     local flake = resolve_flake(opts, position, tree, cwd)
     if flake == nil then
       warn_unresolved_flake(position.path)
       return nil
     end
 
-    command = nix_unit_flake_command(flake)
+    command = {
+      "nix-unit",
+    }
+    vim.list_extend(command, nix_unit_features)
+    table.insert(command, "--expr")
+    table.insert(command, nix_unit_select_expr(flake, position.name))
     context_attr = flake
   elseif
     attr == nil
