@@ -531,6 +531,44 @@ describe("nix-unit results", function()
     assert.are.equal("failed", parsed["tests.nested.testInner"].status)
   end)
 
+  it("maps runtime-prefixed nix-unit names onto leaf positions", function()
+    local root = project()
+    local file_path = vim.fs.joinpath(root, "lib", "tests", "default.nix")
+    local function leaf(name)
+      return Tree:new({
+        attr_path = "system-agnostic." .. name,
+        id = name,
+        name = name,
+        path = file_path,
+        range = { 0, 0, 0, 0 },
+        type = "test",
+      })
+    end
+    local position_tree = Tree:new({
+      id = file_path,
+      name = "default.nix",
+      path = file_path,
+      type = "file",
+    }, { leaf("testDecodeHello"), leaf("testCapitalize") })
+
+    -- nix-unit emits each leaf once per system; a failure under any system wins.
+    local parsed = results.results(run_spec(root, { runner = "nix-unit" }), {
+      code = 1,
+      output = output_file({
+        "\226\156\133 systems.aarch64-darwin.system-agnostic.testDecodeHello",
+        "\226\156\133 systems.x86_64-linux.system-agnostic.testDecodeHello",
+        "\226\156\133 systems.aarch64-darwin.system-agnostic.testCapitalize",
+        "\226\157\140 systems.x86_64-linux.system-agnostic.testCapitalize",
+        "1 != 2",
+        "",
+        "\240\159\152\162 3/4 successful",
+      }),
+    }, position_tree)
+
+    assert.are.equal("passed", parsed.testDecodeHello.status)
+    assert.are.equal("failed", parsed.testCapitalize.status)
+  end)
+
   it("marks every attribute passed when the suite succeeds", function()
     local root = project()
     local position_tree = unit_tree(root)

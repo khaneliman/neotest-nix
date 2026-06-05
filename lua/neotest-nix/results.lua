@@ -323,25 +323,40 @@ local function nix_unit_results(tree, output, code)
 
   local positions = test_positions(tree)
 
-  -- nix-unit names a nested test by its dotted path relative to the suite
-  -- (e.g. "nested.testInner"), while a position's name is the leaf attribute.
-  -- Prefer an exact leaf match, then fall back to an attr_path suffix.
+  -- nix-unit names each test by its dotted path within the run set, which may
+  -- carry a runtime prefix the source has no position for (e.g.
+  -- "systems.x86_64-linux.testFoo" for a per-system suite). Match the most
+  -- specific thing first, then fall back to the leaf attribute, which is what a
+  -- position is named. A leaf shared by several positions is left unmatched
+  -- rather than attributed to the wrong one.
   ---@param name string
   ---@return neotest.Position?
   local function match_position(name)
     for _, position in ipairs(positions) do
-      if position.name == name then
+      ---@cast position neotest-nix.Position
+      if position.name == name or position.attr_path == name then
         return position
       end
     end
     for _, position in ipairs(positions) do
       ---@cast position neotest-nix.Position
       local attr_path = position.attr_path
-      if attr_path ~= nil and (attr_path == name or attr_path:sub(-(#name + 1)) == "." .. name) then
+      if attr_path ~= nil and attr_path:sub(-(#name + 1)) == "." .. name then
         return position
       end
     end
-    return nil
+
+    local leaf = name:match("[^.]+$") or name
+    local found
+    for _, position in ipairs(positions) do
+      if position.name == leaf then
+        if found ~= nil then
+          return nil
+        end
+        found = position
+      end
+    end
+    return found
   end
 
   local results = {}
@@ -353,8 +368,13 @@ local function nix_unit_results(tree, output, code)
 
     local position = match_position(entry.name)
     if position ~= nil then
+      local existing = results[position.id]
       if entry.status == "passed" then
-        results[position.id] = { status = "passed", short = entry.message }
+        -- Keep an earlier failure: the same leaf can appear under several
+        -- systems, and any failing occurrence should win.
+        if existing == nil then
+          results[position.id] = { status = "passed", short = entry.message }
+        end
       else
         results[position.id] = {
           status = "failed",
