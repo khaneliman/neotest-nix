@@ -120,19 +120,26 @@ let
   root = builtins.foldl' (acc: seg: acc.${seg}) flake (builtins.fromJSON ''%s'');
   name = builtins.fromJSON ''%s'';
   find = set:
-    builtins.concatMap (n:
-      let r = builtins.tryEval (set.${n}); in
-      if !r.success then []
-      else let v = r.value; in
-        if builtins.isAttrs v then
-          (if n == name && builtins.hasAttr "expr" v then [ v ]
-           else if builtins.hasAttr "expr" v then []
-           else find v)
-        else []) (builtins.attrNames set);
+    builtins.concatMap (
+      n:
+      let
+        r = builtins.tryEval (set.${n});
+      in
+      if !r.success then
+        [ ]
+      else if builtins.isAttrs r.value && builtins.hasAttr "expr" r.value then
+        (if n == name then [ r.value ] else [ ])
+      else if builtins.isAttrs r.value then
+        find r.value
+      else
+        [ ]
+    ) (builtins.attrNames set);
   matches = find root;
 in
-  if matches == [ ] then throw "neotest-nix: no nix-unit test named ${name}"
-  else { ${name} = builtins.head matches; }
+if matches == [ ] then
+  throw "neotest-nix: no nix-unit test named ${name}"
+else
+  { ${name} = builtins.head matches; }
 ]]):format(path, name)
 end
 
