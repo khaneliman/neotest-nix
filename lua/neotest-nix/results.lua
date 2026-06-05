@@ -338,12 +338,23 @@ local function nix_unit_results(tree, output, code)
         return position
       end
     end
+    -- A suffix shared by several attr_paths is ambiguous, so fall through to
+    -- the leaf check (which carries the same guard) rather than blaming the
+    -- first match.
+    local suffix_match
     for _, position in ipairs(positions) do
       ---@cast position neotest-nix.Position
       local attr_path = position.attr_path
       if attr_path ~= nil and attr_path:sub(-(#name + 1)) == "." .. name then
-        return position
+        if suffix_match ~= nil then
+          suffix_match = nil
+          break
+        end
+        suffix_match = position
       end
+    end
+    if suffix_match ~= nil then
+      return suffix_match
     end
 
     local leaf = name:match("[^.]+$") or name
