@@ -62,11 +62,13 @@ Run `:checkhealth neotest-nix` to verify the requirements above are met.
     "nvim-treesitter/nvim-treesitter",
     "khaneliman/neotest-nix",
   },
-  opts = {
-    adapters = {
-      ["neotest-nix"] = {},
-    },
-  },
+  opts = function()
+    return {
+      adapters = {
+        require("neotest-nix"),
+      },
+    }
+  end,
 }
 ```
 

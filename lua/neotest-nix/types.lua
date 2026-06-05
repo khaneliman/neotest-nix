@@ -36,7 +36,13 @@
 ---        "nvim-treesitter/nvim-treesitter",
 ---        "khaneliman/neotest-nix",
 ---      },
----      opts = { adapters = { ["neotest-nix"] = {} } },
+---      opts = function()
+---        return {
+---          adapters = {
+---            require("neotest-nix"),
+---          },
+---        }
+---      end,
 ---    }
 ---<
 ---Or configure Neotest directly: >lua
