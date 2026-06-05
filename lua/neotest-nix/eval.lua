@@ -104,9 +104,11 @@ local function flake_cache_key(root, test_names)
 end
 
 ---Nix expression that returns the names of the flake's top-level outputs whose
----attribute set contains every one of `test_names`. The applied nix-unit suite
----(e.g. the `tests` output) is such a set; structural outputs like `packages`
----or `checks` are not, and evaluation errors are swallowed per output.
+---candidate output contains every one of `test_names` as nix-unit leaves. The
+---applied nix-unit suite (e.g. the `tests` output) can expose tests directly
+---or under runtime-generated namespaces, and evaluation errors are swallowed
+---per output. Candidate names are intentionally conservative; arbitrary output
+---names should use `nix_unit_flakes` config instead of scanning the whole flake.
 ---@param test_names string[]
 ---@return string
 function M.nix_unit_flake_expr(test_names)
@@ -115,10 +117,45 @@ function M.nix_unit_flake_expr(test_names)
 let
   flake = builtins.getFlake (toString ./. );
   testNames = builtins.fromJSON ''%s'';
-  hasAll = v: builtins.isAttrs v && builtins.all (n: builtins.hasAttr n v) testNames;
+  isTest = v:
+    builtins.isAttrs v
+    && builtins.hasAttr "expr" v
+    && (builtins.hasAttr "expected" v || builtins.hasAttr "expectedError" v);
+  isDerivation = v: builtins.isAttrs v && (v.type or null) == "derivation";
+  candidateName = name:
+    builtins.elem name [ "tests" "libTests" "unitTests" ]
+    || builtins.match ".*[Tt]ests?" name != null;
+  hasDirect = name: set:
+    builtins.hasAttr name set
+    && (let r = builtins.tryEval (set.${name}); in r.success && isTest r.value);
+  hasDirectAll = v: builtins.isAttrs v && builtins.all (n: hasDirect n v) testNames;
+  maxDepth = 8;
+  containsName = depth: target: set:
+    depth <= maxDepth
+    && builtins.isAttrs set
+    && !isDerivation set
+    && builtins.any (
+      name:
+      let
+        r = builtins.tryEval (set.${name});
+      in
+      r.success
+      && (
+        (name == target && isTest r.value)
+        || containsName (depth + 1) target r.value
+      )
+    ) (builtins.attrNames set);
+  hasNestedAll = v: builtins.isAttrs v && builtins.all (n: containsName 0 n v) testNames;
+  candidateNames = builtins.filter candidateName (builtins.attrNames flake);
 in
   builtins.filter
-    (name: let r = builtins.tryEval flake.${name}; in r.success && hasAll r.value)
+    (
+      name:
+      let
+        r = builtins.tryEval flake.${name};
+      in
+      r.success && (hasDirectAll r.value || (candidateName name && hasNestedAll r.value))
+    )
     (builtins.attrNames flake)
 ]]):format(json)
 end
@@ -175,7 +212,7 @@ function M.detect_nix_unit_flake(root, test_names)
   chosen = chosen or names[1]
 
   local flake = ".#" .. chosen
-  nix_unit_flake_cache[root] = flake
+  nix_unit_flake_cache[cache_key] = flake
   return flake
 end
 

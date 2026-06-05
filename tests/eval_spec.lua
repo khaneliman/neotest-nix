@@ -212,8 +212,40 @@ describe("nix-unit flake detection", function()
 
     -- names are embedded as JSON so nix-unit attribute names need no escaping
     assert.is_truthy(expr:find('["testFoo","testBar"]', 1, true))
-    -- only outputs containing every test attribute qualify
+    -- only outputs containing every nix-unit test attribute qualify, including
+    -- outputs that nest tests under generated runtime namespaces.
     assert.is_truthy(expr:find("builtins.all", 1, true))
+    assert.is_truthy(expr:find("containsName", 1, true))
+    assert.is_truthy(expr:find("candidateName", 1, true))
+    assert.is_truthy(expr:find('"tests" "libTests" "unitTests"', 1, true))
+    assert.is_truthy(expr:find('builtins.match ".*[Tt]ests?"', 1, true))
+    assert.is_truthy(expr:find("hasDirectAll", 1, true))
+    assert.is_truthy(expr:find("hasNestedAll", 1, true))
+    assert.is_truthy(expr:find('builtins.hasAttr "expectedError"', 1, true))
+    assert.is_truthy(expr:find("isDerivation", 1, true))
     assert.is_truthy(expr:find("builtins.getFlake", 1, true))
+    assert.is_nil(expr:find("ignoredOutputs", 1, true))
+  end)
+
+  it("caches detected outputs by root and suite names", function()
+    local original_system = vim.system
+    local calls = 0
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(_, _, callback)
+      calls = calls + 1
+      callback({ code = 0, stdout = '["tests"]', stderr = "" })
+      return {}
+    end
+
+    local root = vim.fn.tempname()
+    local names = { "testCacheHit" }
+    local first = eval.detect_nix_unit_flake(root, names)
+    local second = eval.detect_nix_unit_flake(root, names)
+
+    vim.system = original_system
+
+    assert.are.equal(".#tests", first)
+    assert.are.equal(".#tests", second)
+    assert.are.equal(1, calls)
   end)
 end)
