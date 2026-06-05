@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.1.3](https://github.com/khaneliman/neotest-nix/compare/v2.1.2...v2.1.3) (2026-06-05)
+
+
+### Bug Fixes
+
+* **discovery:** allow non-prefixed nix-unit ([deb993a](https://github.com/khaneliman/neotest-nix/commit/deb993a9ce6aca642b559e92bb09cbbd4682bf9c))
+* **eval:** key nix-unit flake cache by suite test names ([4d14072](https://github.com/khaneliman/neotest-nix/commit/4d1407204ea58fbb4cb7342ccde39387ad9cd9d7))
+* **eval:** nest discovered checks under source namespace ([f16c6ad](https://github.com/khaneliman/neotest-nix/commit/f16c6ad58af73e30a7063d21a12af1fb77bd2465))
+* **results:** distribute errors per test on broad runs ([adace82](https://github.com/khaneliman/neotest-nix/commit/adace8262ebc1bc7956c03d5d415dd50707df47f))
+* **results:** guard ambiguous attr_path suffix matches ([0af9352](https://github.com/khaneliman/neotest-nix/commit/0af9352ce09f09a1bd5cea80e7bc498b3b2e6c4f))
+* **results:** map dotted nix-unit names to nested positions ([191f790](https://github.com/khaneliman/neotest-nix/commit/191f7900f4dd119bd46e242f78795985a22f44dd))
+* **results:** match nix-unit leaves under runtime path prefixes ([2e7c165](https://github.com/khaneliman/neotest-nix/commit/2e7c16524d7e9b9dbde66424c79ce695dc54ec80))
+* **spec:** quote nix-unit import paths ([6b18535](https://github.com/khaneliman/neotest-nix/commit/6b185350270d97efe8cd18e180b49d27b29ba771))
+* **spec:** run a single wrapped nix-unit test in isolation ([faf619f](https://github.com/khaneliman/neotest-nix/commit/faf619f6b4c287ca2a0d7e0000aebd2bdd8edee5))
+* **spec:** run flake nix-unit namespaces via nix-unit ([eb7a581](https://github.com/khaneliman/neotest-nix/commit/eb7a581a10c2ff3e4b4183e86506ffdfe391ca99))
+* **spec:** split system namespace runs ([57bb426](https://github.com/khaneliman/neotest-nix/commit/57bb4268f28179cecf36acae3e61cfb4541c0da4))
+
 ## [2.1.2](https://github.com/khaneliman/neotest-nix/compare/v2.1.1...v2.1.2) (2026-05-30)
 
 
