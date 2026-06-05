@@ -84,10 +84,24 @@ function M.eval_outputs(root, specs)
 end
 
 -- Discovered flake installables for wrapped nix-unit suites, keyed by flake
--- root. Only successful lookups are cached, so a failed detection (e.g. a
--- transient eval error) is retried on the next run.
+-- root *and* the suite's test names. A single root can expose several wrapped
+-- suites in different outputs (e.g. ".#tests" and ".#libTests"), so keying on
+-- the root alone would return the first-detected output for every suite. Only
+-- successful lookups are cached, so a failed detection (e.g. a transient eval
+-- error) is retried on the next run.
 ---@type table<string, string>
 local nix_unit_flake_cache = {}
+
+---Stable cache key from the flake root and the suite's test names. The names
+---are sorted into a copy so discovery order does not change the key.
+---@param root string
+---@param test_names string[]
+---@return string
+local function flake_cache_key(root, test_names)
+  local sorted = vim.deepcopy(test_names)
+  table.sort(sorted)
+  return root .. "\0" .. table.concat(sorted, "\0")
+end
 
 ---Nix expression that returns the names of the flake's top-level outputs whose
 ---attribute set contains every one of `test_names`. The applied nix-unit suite
@@ -123,8 +137,9 @@ function M.detect_nix_unit_flake(root, test_names)
     return nil
   end
 
-  if nix_unit_flake_cache[root] ~= nil then
-    return nix_unit_flake_cache[root]
+  local cache_key = flake_cache_key(root, test_names)
+  if nix_unit_flake_cache[cache_key] ~= nil then
+    return nix_unit_flake_cache[cache_key]
   end
 
   local nio = require("nio")
