@@ -167,9 +167,36 @@ describe("spec", function()
       "--extra-experimental-features",
       "flakes",
       "--expr",
-      ("{ testNested = (import %s).nested.testNested; }"):format(path),
+      ("{ testNested = (import (builtins.path { path = %s; })).nested.testNested; }"):format(
+        vim.json.encode(path)
+      ),
     }, run.command)
     assert.are.equal("nested.testNested", run.context.attr)
+  end)
+
+  it("quotes bare-attrset nix-unit paths with spaces", function()
+    local root = project()
+    local dir = vim.fs.joinpath(root, "path with spaces")
+    vim.fn.mkdir(dir, "p")
+    local path = vim.fs.joinpath(dir, "tests.nix")
+    local test = node({
+      attr_path = "testSpacedPath",
+      id = "testSpacedPath",
+      name = "testSpacedPath",
+      nix_unit_kind = "import",
+      path = path,
+      runner = "nix-unit",
+      type = "test",
+    })
+
+    local run = build_spec({ tree = test })
+
+    assert.are.equal(
+      ("{ testSpacedPath = (import (builtins.path { path = %s; })).testSpacedPath; }"):format(
+        vim.json.encode(path)
+      ),
+      run.command[5]
+    )
   end)
 
   it("runs wrapped nix-unit tests via the configured flake installable", function()

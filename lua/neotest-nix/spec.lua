@@ -85,13 +85,20 @@ local function check_attr(tree)
   return ("checks.%s.%s"):format(system, test)
 end
 
+---@param value string
+---@return string
+local function nix_string(value)
+  return vim.json.encode(value)
+end
+
 ---@param attr string
 ---@param kind "flake"|"import"
 ---@param path string
 ---@return string
 local function nix_unit_expr(attr, kind, path)
   local name = attr:match("([^.]+)$") or "test"
-  local root = kind == "import" and ("(import %s)"):format(path)
+  local root = kind == "import"
+      and ("(import (builtins.path { path = %s; }))"):format(nix_string(path))
     or "(builtins.getFlake (toString ./. ))"
   return ("{ %s = %s.%s; }"):format(name, root, attr)
 end
