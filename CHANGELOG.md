@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.4](https://github.com/khaneliman/neotest-nix/compare/v2.1.3...v2.1.4) (2026-06-05)
+
+
+### Bug Fixes
+
+* **eval:** detect nested nix-unit outputs ([70c1094](https://github.com/khaneliman/neotest-nix/commit/70c1094a5799a3c31fc36ef56caf6481cf116b54))
+* **results:** preserve stream chunk boundaries ([faf926e](https://github.com/khaneliman/neotest-nix/commit/faf926e4b2f5d348fb6016b87338bcdaf0551338))
+* **spec:** select every wrapped nix-unit match ([67d25dd](https://github.com/khaneliman/neotest-nix/commit/67d25dd96d7dd81e22b15860549e0c805a1f0044))
+
 ## [2.1.3](https://github.com/khaneliman/neotest-nix/compare/v2.1.2...v2.1.3) (2026-06-05)
 
 
