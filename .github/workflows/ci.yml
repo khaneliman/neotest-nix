@@ -42,7 +42,6 @@ jobs:
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
       - name: Build plugin package
-        if: github.event_name != 'pull_request'
         run: nix build .#neotest-nix --print-build-logs
 
       - name: Run flake checks
