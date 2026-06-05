@@ -176,5 +176,3 @@ Commit history is the source of truth for automation:
 [release-please](https://github.com/googleapis/release-please) opens release
 PRs and tags versions from the commit log, and tagged releases are published to
 [LuaRocks](https://luarocks.org/modules/khaneliman/neotest-nix) automatically.
-</content>
-</invoke>
