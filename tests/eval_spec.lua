@@ -145,6 +145,31 @@ describe("eval output merge", function()
     assert.is_not_nil(tests_by_attr(merged)["checks.x86_64-linux.extra"])
   end)
 
+  it("nests generated checks under the source namespace without duplicating it", function()
+    local merged = adapter._merge_eval_outputs(
+      tree_with_literal_check(),
+      "x86_64-linux",
+      checks({ "unit", "extra" })
+    )
+
+    local checks_namespaces = 0
+    local system_namespaces = 0
+    for _, position in merged:iter() do
+      if position.type == "namespace" and position.name == "checks" then
+        checks_namespaces = checks_namespaces + 1
+      elseif position.type == "namespace" and position.name == "x86_64-linux" then
+        system_namespaces = system_namespaces + 1
+      end
+    end
+
+    assert.are.equal(1, checks_namespaces)
+    assert.are.equal(1, system_namespaces)
+
+    local tests = tests_by_attr(merged)
+    assert.is_not_nil(tests["checks.x86_64-linux.unit"])
+    assert.is_not_nil(tests["checks.x86_64-linux.extra"])
+  end)
+
   it("qualifies injected ids by file so sibling flakes do not collide", function()
     local function file_tree_at(path)
       return Tree.from_list({

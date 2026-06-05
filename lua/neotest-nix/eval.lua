@@ -164,6 +164,26 @@ function M.detect_nix_unit_flake(root, test_names)
   return flake
 end
 
+---Find a descendant namespace by name in a `Tree:to_list` structure, where
+---each node is `{ data, child_node... }`. Used to nest eval-discovered checks
+---under the source-parsed namespace instead of a parallel duplicate.
+---@param node table
+---@param name string
+---@return table?
+local function find_namespace(node, name)
+  for index = 2, #node do
+    local child = node[index]
+    if child[1].type == "namespace" and child[1].name == name then
+      return child
+    end
+    local found = find_namespace(child, name)
+    if found ~= nil then
+      return found
+    end
+  end
+  return nil
+end
+
 ---Merge eval-discovered flake outputs into a source-parsed position tree.
 ---@param tree neotest.Tree
 ---@param system string
@@ -199,21 +219,12 @@ function M.merge_outputs(tree, system, outputs)
     local attr = output.attr
 
     ---@type table[]
-    local system_child = {
-      {
-        id = eval_id(("%s.%s"):format(attr, system)),
-        name = system,
-        path = file_path,
-        type = "namespace",
-        range = { 0, 0, 0, 0 },
-      },
-    }
-
+    local leaves = {}
     for _, name in ipairs(output.names) do
       local attr_path = ("%s.%s.%s"):format(attr, system, name)
       if not existing[attr_path] then
         existing[attr_path] = true
-        table.insert(system_child, {
+        table.insert(leaves, {
           {
             id = eval_id(attr_path),
             name = name,
@@ -228,18 +239,41 @@ function M.merge_outputs(tree, system, outputs)
     end
 
     -- Only add the output when it has names the source didn't already declare.
-    if #system_child > 1 then
+    if #leaves > 0 then
       added = true
-      table.insert(list, {
-        {
-          id = eval_id(attr),
-          name = attr,
-          path = file_path,
-          type = "namespace",
-          range = { 0, 0, 0, 0 },
-        },
-        system_child,
-      })
+
+      local attr_node = find_namespace(list, attr)
+      local system_node = attr_node ~= nil and find_namespace(attr_node, system) or nil
+
+      if system_node ~= nil then
+        vim.list_extend(system_node, leaves)
+      else
+        local system_child = {
+          {
+            id = eval_id(("%s.%s"):format(attr, system)),
+            name = system,
+            path = file_path,
+            type = "namespace",
+            range = { 0, 0, 0, 0 },
+          },
+        }
+        vim.list_extend(system_child, leaves)
+
+        if attr_node ~= nil then
+          table.insert(attr_node, system_child)
+        else
+          table.insert(list, {
+            {
+              id = eval_id(attr),
+              name = attr,
+              path = file_path,
+              type = "namespace",
+              range = { 0, 0, 0, 0 },
+            },
+            system_child,
+          })
+        end
+      end
     end
   end
 
