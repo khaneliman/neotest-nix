@@ -31,6 +31,7 @@
             config.pre-commit.settings.package
           ]
           ++ (with pkgs; [
+            lua51Packages.nlua
             lua51Packages.vusted
             lua-language-server
             nil
