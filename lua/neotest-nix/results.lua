@@ -22,16 +22,32 @@ local function read_file(path)
   return content
 end
 
+---@param line string
+---@return string?
+local function parse_error_line(line)
+  local parsed = line:match("^%s*error:%s*(.*)$")
+  if parsed == nil then
+    return nil
+  end
+
+  local trimmed = vim.trim(parsed)
+  if trimmed == "" then
+    return nil
+  end
+
+  return trimmed
+end
+
 ---@param output string
 ---@return string
 local function error_message(output)
   local message
 
   for line in output:gmatch("[^\r\n]+") do
-    local parsed = line:match("^%s*error:%s*(.+)$")
-    if parsed ~= nil and parsed ~= "" then
-      -- The first `error:` line is the underlying cause; later lines are
-      -- usually the generic "build of '...' failed" wrapper.
+    local parsed = parse_error_line(line)
+    if parsed ~= nil then
+      -- The first non-empty `error:` line is the underlying cause; later lines
+      -- are usually the generic "build of '...' failed" wrapper.
       message = parsed
       break
     end
@@ -73,15 +89,24 @@ end
 ---@return neotest-nix.ParsedError[]
 function M.parse_errors(output, root)
   local errors = {}
-  local message = error_message(output)
+  -- Track the most recent `error:` line so each location is attributed to the
+  -- error it belongs to. A run with `--keep-going` emits several independent
+  -- errors, each followed by its own `at <path>:row:col:` frame(s); a single
+  -- shared message would mislabel every location with the first error's text.
+  local current_message
 
   for line in output:gmatch("[^\r\n]+") do
+    local parsed = parse_error_line(line)
+    if parsed ~= nil then
+      current_message = parsed
+    end
+
     local path, row, column = line:match("^%s*at%s+([^:\n]+):(%d+):(%d+):")
     if path ~= nil then
       local translated = local_error_path(path, root)
       if translated ~= nil then
         table.insert(errors, {
-          message = message,
+          message = current_message or error_message(output),
           path = translated,
           line = tonumber(row) - 1,
           column = tonumber(column) - 1,

@@ -233,6 +233,32 @@ describe("results", function()
     assert.is_nil(parsed[position_tree:data().id])
   end)
 
+  it("attributes each distinct error to its own location", function()
+    local root = project()
+    local position_tree = multi_test_tree(root)
+    local parsed = results.results(
+      run_spec(root, {
+        pos_id = position_tree:data().id,
+        type = "file",
+      }),
+      {
+        code = 1,
+        output = output_file({
+          "error: first assertion failed",
+          "       at /nix/store/abc123-source/checks/unit.nix:1:1:",
+          "error: second assertion failed",
+          "       at /nix/store/abc123-source/checks/unit.nix:3:1:",
+        }),
+      },
+      position_tree
+    )
+
+    assert.are.equal("first assertion failed", parsed.first.errors[1].message)
+    assert.are.equal(0, parsed.first.errors[1].line)
+    assert.are.equal("second assertion failed", parsed.second.errors[1].message)
+    assert.are.equal(2, parsed.second.errors[1].line)
+  end)
+
   it("uses targeted run context when assigning errors", function()
     local root = project()
     local position_tree = tree(root)
@@ -286,6 +312,20 @@ describe("results", function()
       "command failed without source location",
       parsed[position_tree:data().id].short
     )
+  end)
+
+  it("skips empty error lines and trims messages when assigning locations", function()
+    local root = project()
+    local errors = results.parse_errors(
+      table.concat({
+        "error:   ",
+        "error:   assertion failed   ",
+        "       at /nix/store/abc123-source/checks/unit.nix:2:3:",
+      }, "\n"),
+      root
+    )
+
+    assert.are.equal("assertion failed", errors[1].message)
   end)
 
   it("maps Python tracebacks into NixOS VM test scripts", function()
