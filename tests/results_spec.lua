@@ -314,6 +314,18 @@ describe("results", function()
     )
   end)
 
+  it("falls back to a root failure on empty output", function()
+    local root = project()
+    local position_tree = tree(root)
+    local parsed = results.results(run_spec(root), {
+      code = 1,
+      output = output_file({}),
+    }, position_tree)
+
+    assert.are.equal("failed", parsed[position_tree:data().id].status)
+    assert.are.equal("Nix command failed", parsed[position_tree:data().id].short)
+  end)
+
   it("skips empty error lines and trims messages when assigning locations", function()
     local root = project()
     local errors = results.parse_errors(
@@ -326,6 +338,33 @@ describe("results", function()
     )
 
     assert.are.equal("assertion failed", errors[1].message)
+  end)
+
+  it("ignores malformed error frames without a usable location", function()
+    local root = project()
+    local errors = results.parse_errors(
+      table.concat({
+        "error: boom",
+        "       at not-a-real-frame",
+        "       at /tmp:::",
+      }, "\n"),
+      root
+    )
+
+    assert.are.same({}, errors)
+  end)
+
+  it("drops store frames that do not reconstruct to a local file", function()
+    local root = project()
+    local errors = results.parse_errors(
+      table.concat({
+        "error: boom",
+        "       at /nix/store/abc123-source/checks/missing.nix:1:1:",
+      }, "\n"),
+      root
+    )
+
+    assert.are.same({}, errors)
   end)
 
   it("maps Python tracebacks into NixOS VM test scripts", function()
@@ -509,6 +548,19 @@ describe("nix-unit results", function()
     assert.are.equal("{ x = 1; } != { y = 1; }", by_name.testFail.message)
     -- the eval-error block is captured whole, blank lines and all
     assert.is_truthy(by_name.testFailEval.message:match("error: NO U"))
+  end)
+
+  it("skips a status marker that carries no attribute name", function()
+    local entries = results.parse_nix_unit(table.concat({
+      "\226\157\140",
+      "  orphan detail",
+      "\226\156\133 testPass",
+      "\240\159\152\162 1/2 successful",
+    }, "\n"))
+
+    assert.are.equal(1, #entries)
+    assert.are.equal("testPass", entries[1].name)
+    assert.are.equal("passed", entries[1].status)
   end)
 
   it("maps per-attribute results onto their positions", function()
