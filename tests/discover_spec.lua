@@ -63,6 +63,26 @@ describe("discover", function()
     assert.is_false(discover.is_test_file(vim.fs.joinpath(tests_dir, "fixtures.nix")))
   end)
 
+  it("accepts expectedError assertions and rejects expr alone", function()
+    local expected_error = {
+      "{",
+      "  testThrows = {",
+      '    expr = throw "boom";',
+      '    expectedError.type = "ThrownError";',
+      "  };",
+      "}",
+    }
+    local expr_only = { "{", "  testFoo = {", "    expr = 1;", "  };", "}" }
+
+    write_file(vim.fs.joinpath(tmp, "throws_test.nix"), expected_error)
+    write_file(vim.fs.joinpath(tmp, "expr_test.nix"), expr_only)
+
+    -- expr + expectedError is a valid nix-unit shape
+    assert.is_true(discover.is_test_file(vim.fs.joinpath(tmp, "throws_test.nix")))
+    -- expr without expected/expectedError is not
+    assert.is_false(discover.is_test_file(vim.fs.joinpath(tmp, "expr_test.nix")))
+  end)
+
   it("filters store, git, and build output directories", function()
     assert.is_false(discover.filter_dir(".git", ".git", tmp))
     assert.is_false(discover.filter_dir("result", "result", tmp))
