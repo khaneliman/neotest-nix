@@ -204,6 +204,70 @@ describe("eval output merge", function()
   end)
 end)
 
+describe("eval_outputs", function()
+  local eval = require("neotest-nix.eval")
+
+  ---Stub vim.system so the system probe and the attrNames eval return canned
+  ---output; the callback fires synchronously so the nio future resolves at once.
+  ---@param system string
+  ---@param names_json string
+  local function stub_system(system, names_json)
+    local original = vim.system
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(command, _, callback)
+      local joined = table.concat(command, " ")
+      if joined:find("builtins.currentSystem", 1, true) then
+        callback({ code = 0, stdout = system, stderr = "" })
+      else
+        callback({ code = 0, stdout = names_json, stderr = "" })
+      end
+      return {}
+    end
+    finally(function()
+      vim.system = original
+    end)
+  end
+
+  it("enumerates output names per system", function()
+    stub_system("x86_64-linux\n", '["unit","integration"]')
+
+    local result = eval.eval_outputs(vim.fn.tempname(), { { attr = "checks" } })
+    if result == nil then
+      error("eval_outputs returned nil")
+    end
+
+    assert.are.equal("x86_64-linux", result.system)
+    assert.are.equal(1, #result.outputs)
+    assert.are.equal("checks", result.outputs[1].attr)
+    assert.are.same({ "unit", "integration" }, result.outputs[1].names)
+  end)
+
+  it("applies the match filter to output names", function()
+    stub_system("x86_64-linux", '["testFoo","integration","testBar"]')
+
+    local result = eval.eval_outputs(vim.fn.tempname(), { { attr = "checks", match = "^test" } })
+    if result == nil then
+      error("eval_outputs returned nil")
+    end
+
+    assert.are.same({ "testFoo", "testBar" }, result.outputs[1].names)
+  end)
+
+  it("returns nil when the current system cannot be determined", function()
+    local original = vim.system
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(_, _, callback)
+      callback({ code = 1, stdout = "", stderr = "boom" })
+      return {}
+    end
+    finally(function()
+      vim.system = original
+    end)
+
+    assert.is_nil(eval.eval_outputs(vim.fn.tempname()))
+  end)
+end)
+
 describe("nix-unit flake detection", function()
   local eval = require("neotest-nix.eval")
 
