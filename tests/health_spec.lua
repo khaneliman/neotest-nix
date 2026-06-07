@@ -73,4 +73,55 @@ describe("health config check", function()
     check_with_opts({ discover_eval_checks = true, eval_outputs = { { attr = "checks" } } })
     assert.is_true(any_match(recorded.ok, "configuration looks valid"))
   end)
+
+  it("errors on an unsupported Neovim version", function()
+    local real_has = vim.fn.has
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.fn.has = function(feature)
+      if feature == "nvim-0.11" then
+        return 0
+      end
+      return real_has(feature)
+    end
+    finally(function()
+      vim.fn.has = real_has
+    end)
+
+    check_with_opts({})
+    assert.is_true(any_match(recorded.error, "Neovim >= 0.11 is required"))
+  end)
+
+  it("errors when nix is not on PATH", function()
+    local real_executable = vim.fn.executable
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.fn.executable = function(name)
+      if name == "nix" then
+        return 0
+      end
+      return real_executable(name)
+    end
+    finally(function()
+      vim.fn.executable = real_executable
+    end)
+
+    check_with_opts({})
+    assert.is_true(any_match(recorded.error, "`nix` not found on PATH"))
+  end)
+
+  it("warns when nix-unit is not on PATH", function()
+    local real_executable = vim.fn.executable
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.fn.executable = function(name)
+      if name == "nix-unit" then
+        return 0
+      end
+      return real_executable(name)
+    end
+    finally(function()
+      vim.fn.executable = real_executable
+    end)
+
+    check_with_opts({})
+    assert.is_true(any_match(recorded.warn, "`nix%-unit` not found on PATH"))
+  end)
 end)
