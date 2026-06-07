@@ -145,7 +145,10 @@ end
 ---@return boolean
 local function nix_unit_summary(line)
   -- e.g. "🎉 3/3 successful", "😢 1/3 successful", "error: Tests failed".
-  return line:match("%d+/%d+ successful") ~= nil or line:match("^error: Tests failed") ~= nil
+  -- Tolerate spacing drift so a summary line is never mistaken for a detail
+  -- line and appended to the previous attribute's message.
+  return line:match("%d+/%d+%s+successful%s*$") ~= nil
+    or line:match("^%s*error:%s*Tests%s+failed%s*$") ~= nil
 end
 
 ---@class neotest-nix.NixUnitEntry

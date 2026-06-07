@@ -326,6 +326,20 @@ describe("results", function()
     assert.are.equal("Nix command failed", parsed[position_tree:data().id].short)
   end)
 
+  it("skips whitespace-only error lines when choosing a message", function()
+    local root = project()
+    local position_tree = tree(root)
+    local parsed = results.results(run_spec(root), {
+      code = 1,
+      output = output_file({
+        "error:   ",
+        "error: the real cause",
+      }),
+    }, position_tree)
+
+    assert.are.equal("the real cause", parsed[position_tree:data().id].short)
+  end)
+
   it("skips empty error lines and trims messages when assigning locations", function()
     local root = project()
     local errors = results.parse_errors(
@@ -550,6 +564,18 @@ describe("nix-unit results", function()
     assert.is_truthy(by_name.testFailEval.message:match("error: NO U"))
   end)
 
+  it("treats a summary line with spacing drift as a summary, not detail", function()
+    local entries = results.parse_nix_unit(table.concat({
+      "\226\156\133 testA",
+      "\240\159\142\137 2/2  successful",
+    }, "\n"))
+
+    assert.are.equal(1, #entries)
+    assert.are.equal("testA", entries[1].name)
+    -- The summary line must flush, not append to testA's message.
+    assert.are.equal("", entries[1].message)
+  end)
+
   it("skips a status marker that carries no attribute name", function()
     local entries = results.parse_nix_unit(table.concat({
       "\226\157\140",
@@ -561,6 +587,16 @@ describe("nix-unit results", function()
     assert.are.equal(1, #entries)
     assert.are.equal("testPass", entries[1].name)
     assert.are.equal("passed", entries[1].status)
+  end)
+
+  it("keeps embedded summary-looking text inside attribute detail", function()
+    local entries = results.parse_nix_unit(table.concat({
+      "\226\157\140 testA",
+      "nested error: Tests failed downstream",
+      "\240\159\152\162 0/1 successful",
+    }, "\n"))
+
+    assert.are.equal("nested error: Tests failed downstream", entries[1].message)
   end)
 
   it("maps per-attribute results onto their positions", function()
