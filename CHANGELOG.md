@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.5](https://github.com/khaneliman/neotest-nix/compare/v2.1.4...v2.1.5) (2026-06-08)
+
+
+### Bug Fixes
+
+* **results:** attribute nearest error to each location ([fbd2994](https://github.com/khaneliman/neotest-nix/commit/fbd2994597061f5126dabb58b6fa7220c2ed1c7d))
+* **results:** tolerate spacing drift in nix-unit summary and errors ([66841d7](https://github.com/khaneliman/neotest-nix/commit/66841d7c68a000c4277f77a6e2899b7495007ec8))
+* **runtime:** handle spawn failures ([a9dc2dc](https://github.com/khaneliman/neotest-nix/commit/a9dc2dc0ec0bcf2b3f5c45fcf6d53acbee4069de))
+
 ## [2.1.4](https://github.com/khaneliman/neotest-nix/compare/v2.1.3...v2.1.4) (2026-06-05)
 
 
