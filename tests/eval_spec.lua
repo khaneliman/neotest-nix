@@ -266,6 +266,19 @@ describe("eval_outputs", function()
 
     assert.is_nil(eval.eval_outputs(vim.fn.tempname()))
   end)
+
+  it("returns nil when the system probe cannot be spawned", function()
+    local original = vim.system
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function()
+      error("ENOENT: nix")
+    end
+    finally(function()
+      vim.system = original
+    end)
+
+    assert.is_nil(eval.eval_outputs(vim.fn.tempname()))
+  end)
 end)
 
 describe("nix-unit flake detection", function()
@@ -311,5 +324,18 @@ describe("nix-unit flake detection", function()
     assert.are.equal(".#tests", first)
     assert.are.equal(".#tests", second)
     assert.are.equal(1, calls)
+  end)
+
+  it("returns nil when flake detection cannot spawn nix", function()
+    local original_system = vim.system
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function()
+      error("ENOENT: nix")
+    end
+    finally(function()
+      vim.system = original_system
+    end)
+
+    assert.is_nil(eval.detect_nix_unit_flake(vim.fn.tempname(), { "testMissingNix" }))
   end)
 end)

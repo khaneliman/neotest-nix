@@ -2,6 +2,19 @@ local nio = require("nio")
 
 local M = {}
 
+---@param command string[]
+---@param err any
+---@return string
+local function spawn_error_message(command, err)
+  local executable = command[1] or "<unknown>"
+  local message = tostring(err)
+  if message:match("ENOENT") ~= nil then
+    return ("neotest-nix: failed to start `%s`: executable not found on PATH"):format(executable)
+  end
+
+  return ("neotest-nix: failed to start `%s`: %s"):format(executable, message)
+end
+
 ---@async
 ---@param spec neotest.RunSpec
 ---@return neotest.Process
@@ -29,13 +42,8 @@ function M.strategy(spec)
     output_queue.put_nowait(data)
   end
 
-  local process = vim.system(spec.command, {
-    cwd = spec.cwd,
-    env = spec.env,
-    stderr = on_output,
-    stdout = on_output,
-  }, function(result)
-    result_code = result.code
+  local function complete(code)
+    result_code = code
     if output_file ~= nil then
       output_file:close()
       output_file = nil
@@ -44,7 +52,24 @@ function M.strategy(spec)
       output_finish.set()
     end
     finish.set()
+  end
+
+  ---@type vim.SystemObj?
+  local process
+  local ok, system = pcall(vim.system, spec.command, {
+    cwd = spec.cwd,
+    env = spec.env,
+    stderr = on_output,
+    stdout = on_output,
+  }, function(result)
+    complete(result.code)
   end)
+  if ok then
+    process = system
+  else
+    on_output(nil, spawn_error_message(spec.command, system))
+    complete(1)
+  end
 
   return {
     attach = function() end,
@@ -71,7 +96,9 @@ function M.strategy(spec)
       return result_code or 1
     end,
     stop = function()
-      process:kill(15)
+      if process ~= nil then
+        process:kill(15)
+      end
     end,
   }
 end

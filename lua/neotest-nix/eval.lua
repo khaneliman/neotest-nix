@@ -9,6 +9,26 @@ local default_eval_outputs = {
   { attr = "checks" },
 }
 
+---@class neotest-nix.SystemResult
+---@field code integer
+---@field stdout string?
+---@field stderr string?
+
+---@param command string[]
+---@param root string
+---@return neotest-nix.SystemResult
+local function run(command, root)
+  local nio = require("nio")
+  local future = nio.control.future()
+  local ok, err = pcall(vim.system, command, { cwd = root, text = true }, function(result)
+    future.set(result)
+  end)
+  if not ok then
+    return { code = 1, stdout = "", stderr = tostring(err) }
+  end
+  return future.wait()
+end
+
 ---@param names string[]
 ---@param pattern string?
 ---@return string[]
@@ -33,23 +53,12 @@ end
 function M.eval_outputs(root, specs)
   specs = specs or default_eval_outputs
 
-  local nio = require("nio")
-
-  ---@param command string[]
-  local function run(command)
-    local future = nio.control.future()
-    vim.system(command, { cwd = root, text = true }, function(result)
-      future.set(result)
-    end)
-    return future.wait()
-  end
-
   -- Current system: cheap impure builtin, does not evaluate the flake.
   local system_command = { "nix", "eval", "--impure", "--raw" }
   vim.list_extend(system_command, nix_command_features)
   vim.list_extend(system_command, { "--expr", "builtins.currentSystem" })
 
-  local system_result = run(system_command)
+  local system_result = run(system_command, root)
   if system_result.code ~= 0 or system_result.stdout == nil or system_result.stdout == "" then
     return nil
   end
@@ -68,7 +77,7 @@ function M.eval_outputs(root, specs)
       { "--apply", "builtins.attrNames", (".#%s.%s"):format(output_spec.attr, system) }
     )
 
-    local names_result = run(names_command)
+    local names_result = run(names_command, root)
     if names_result.code == 0 and names_result.stdout ~= nil and names_result.stdout ~= "" then
       local ok, names = pcall(vim.json.decode, names_result.stdout)
       if ok and type(names) == "table" then
@@ -179,7 +188,6 @@ function M.detect_nix_unit_flake(root, test_names)
     return nix_unit_flake_cache[cache_key]
   end
 
-  local nio = require("nio")
   -- --impure: getFlake refuses an unlocked local flake reference otherwise.
   -- --no-write-lock-file: discovery must not mutate the repo by locking the
   -- flake on disk.
@@ -187,11 +195,7 @@ function M.detect_nix_unit_flake(root, test_names)
   vim.list_extend(command, nix_command_features)
   vim.list_extend(command, { "--expr", M.nix_unit_flake_expr(test_names) })
 
-  local future = nio.control.future()
-  vim.system(command, { cwd = root, text = true }, function(result)
-    future.set(result)
-  end)
-  local result = future.wait()
+  local result = run(command, root)
 
   if result.code ~= 0 or result.stdout == nil or result.stdout == "" then
     return nil
