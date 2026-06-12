@@ -32,11 +32,110 @@ local function dirname(path)
   return vim.fs.dirname(vim.fs.normalize(path))
 end
 
+---@param content string
+---@return string
+local function strip_nix_comments_and_strings(content)
+  local out = {}
+  local i = 1
+  local len = #content
+
+  local function append_space(count)
+    for _ = 1, count do
+      out[#out + 1] = " "
+    end
+  end
+
+  while i <= len do
+    local char = content:sub(i, i)
+    local next_two = content:sub(i, i + 1)
+
+    if char == "#" then
+      append_space(1)
+      i = i + 1
+      while i <= len and content:sub(i, i) ~= "\n" do
+        append_space(1)
+        i = i + 1
+      end
+      if i <= len then
+        append_space(1)
+        i = i + 1
+      end
+    elseif next_two == "/*" then
+      append_space(2)
+      i = i + 2
+      while i <= len and content:sub(i, i + 1) ~= "*/" do
+        append_space(1)
+        i = i + 1
+      end
+      if i <= len then
+        append_space(2)
+        i = i + 2
+      end
+    elseif char == '"' then
+      append_space(1)
+      i = i + 1
+      while i <= len do
+        local quoted = content:sub(i, i)
+        if quoted == "\\" then
+          if i < len then
+            append_space(2)
+            i = i + 2
+          else
+            append_space(1)
+            i = i + 1
+          end
+        elseif quoted == '"' then
+          append_space(1)
+          i = i + 1
+          break
+        else
+          append_space(1)
+          i = i + 1
+        end
+      end
+    elseif next_two == "''" then
+      append_space(2)
+      i = i + 2
+      while i <= len do
+        if content:sub(i, i + 1) == "''" then
+          local escaped = content:sub(i + 2, i + 2)
+          if escaped == "'" or escaped == "$" then
+            append_space(3)
+            i = i + 3
+          else
+            append_space(2)
+            i = i + 2
+            break
+          end
+        else
+          append_space(1)
+          i = i + 1
+        end
+      end
+    else
+      out[#out + 1] = char
+      i = i + 1
+    end
+  end
+
+  return table.concat(out)
+end
+
 ---@param dir string
 ---@return string?
 function M.root(dir)
   local normalized = vim.fs.normalize(dir)
-  local start = path_exists(normalized) and normalized or dirname(normalized)
+  local start
+  if path_exists(normalized) then
+    start = normalized
+  else
+    local parent = dirname(normalized)
+    if parent == nil or parent == "" or not path_exists(parent) then
+      return nil
+    end
+    start = parent
+  end
+
   if is_file(start) then
     start = dirname(start)
   end
@@ -72,10 +171,11 @@ local function has_nix_unit_assertion(file_path)
     return false
   end
 
-  return content:match("%f[%w]expr%f[%W]") ~= nil
+  local search = strip_nix_comments_and_strings(content)
+  return search:match("%f[%w]expr%f[%W]") ~= nil
     and (
-      content:match("%f[%w]expected%f[%W]") ~= nil
-      or content:match("%f[%w]expectedError%f[%W]") ~= nil
+      search:match("%f[%w]expected%f[%W]") ~= nil
+      or search:match("%f[%w]expectedError%f[%W]") ~= nil
     )
 end
 

@@ -26,6 +26,21 @@ describe("discover", function()
     assert.are.equal(project, discover.root(vim.fs.joinpath(nested, "example_test.nix")))
   end)
 
+  it("returns nil for missing relative paths instead of falling back to cwd", function()
+    local cwd = vim.fn.getcwd()
+    vim.fn.chdir(tmp)
+    write_file(vim.fs.joinpath(tmp, "flake.nix"), { "{}" })
+
+    local ok, err = pcall(function()
+      assert.is_nil(discover.root("missing/path/example_test.nix"))
+    end)
+
+    vim.fn.chdir(cwd)
+    if not ok then
+      error(err)
+    end
+  end)
+
   it("matches flake and nix-unit test files", function()
     local nix_unit = { "{", "  testFoo = {", "    expr = 1;", "    expected = 1;", "  };", "}" }
     local empty = { "{ }" }
@@ -81,6 +96,57 @@ describe("discover", function()
     assert.is_true(discover.is_test_file(vim.fs.joinpath(tmp, "throws_test.nix")))
     -- expr without expected/expectedError is not
     assert.is_false(discover.is_test_file(vim.fs.joinpath(tmp, "expr_test.nix")))
+  end)
+
+  it("ignores nix-unit keywords in comments and strings", function()
+    local commented_keywords = {
+      "{",
+      "  # test = { expr = 1; expected = 1; };",
+      "}",
+    }
+    local string_keywords = {
+      "{",
+      "  testFixture = {",
+      '    expr = "expected = 1;";',
+      "  };",
+      "}",
+    }
+    local block_comment_keywords = {
+      "{",
+      "  /* test = { expr = 1; expected = 1; }; */",
+      "}",
+    }
+
+    write_file(vim.fs.joinpath(tmp, "commented_test.nix"), commented_keywords)
+    write_file(vim.fs.joinpath(tmp, "stringed_test.nix"), string_keywords)
+    write_file(vim.fs.joinpath(tmp, "block-commented_test.nix"), block_comment_keywords)
+
+    assert.is_false(discover.is_test_file(vim.fs.joinpath(tmp, "commented_test.nix")))
+    assert.is_false(discover.is_test_file(vim.fs.joinpath(tmp, "stringed_test.nix")))
+    assert.is_false(discover.is_test_file(vim.fs.joinpath(tmp, "block-commented_test.nix")))
+  end)
+
+  it("ignores nix-unit keywords in indented string escapes", function()
+    local escaped_quotes = {
+      "{",
+      "  fixture = ''",
+      "    ''' expr = 1; expected = 1;",
+      "  '';",
+      "}",
+    }
+    local escaped_interpolation = {
+      "{",
+      "  fixture = ''",
+      "    ''${expr = 1; expected = 1;}",
+      "  '';",
+      "}",
+    }
+
+    write_file(vim.fs.joinpath(tmp, "escaped-quotes_test.nix"), escaped_quotes)
+    write_file(vim.fs.joinpath(tmp, "escaped-interpolation_test.nix"), escaped_interpolation)
+
+    assert.is_false(discover.is_test_file(vim.fs.joinpath(tmp, "escaped-quotes_test.nix")))
+    assert.is_false(discover.is_test_file(vim.fs.joinpath(tmp, "escaped-interpolation_test.nix")))
   end)
 
   it("filters store, git, and build output directories", function()
