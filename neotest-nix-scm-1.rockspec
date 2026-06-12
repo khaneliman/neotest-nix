@@ -17,6 +17,8 @@ dependencies = {
 }
 
 test_dependencies = {
+  "busted",
+  "nlua",
   "neotest",
   "nvim-nio",
 }
