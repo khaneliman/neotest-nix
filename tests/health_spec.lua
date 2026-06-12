@@ -74,6 +74,69 @@ describe("health config check", function()
     assert.is_true(any_match(recorded.ok, "configuration looks valid"))
   end)
 
+  it("accepts parser_runtime_paths for the grammar check", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(vim.fs.joinpath(root, "parser"), "p")
+    vim.fn.writefile({}, vim.fs.joinpath(root, "parser", "nix.so"))
+
+    local real_runtime_file = vim.api.nvim_get_runtime_file
+    local real_language_add = vim.treesitter.language.add
+    local expected_parser = vim.fs.joinpath(root, "parser", "nix.so")
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.api.nvim_get_runtime_file = function(name, all)
+      if name == "parser/nix.so" then
+        return {}
+      end
+      return real_runtime_file(name, all)
+    end
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.treesitter.language.add = function(lang, opts)
+      if lang == "nix" and (opts == nil or opts.path ~= expected_parser) then
+        error("missing nix parser")
+      end
+      return true
+    end
+    finally(function()
+      vim.api.nvim_get_runtime_file = real_runtime_file
+      vim.treesitter.language.add = real_language_add
+    end)
+
+    check_with_opts({ parser_runtime_paths = { root } })
+
+    assert.is_true(any_match(recorded.ok, "`nix` tree%-sitter grammar available"))
+  end)
+
+  it("rejects broken parser_runtime_paths for the grammar check", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(vim.fs.joinpath(root, "parser"), "p")
+    vim.fn.writefile({}, vim.fs.joinpath(root, "parser", "nix.so"))
+
+    local real_runtime_file = vim.api.nvim_get_runtime_file
+    local real_language_add = vim.treesitter.language.add
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.api.nvim_get_runtime_file = function(name, all)
+      if name == "parser/nix.so" then
+        return {}
+      end
+      return real_runtime_file(name, all)
+    end
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.treesitter.language.add = function(lang)
+      if lang == "nix" then
+        error("missing nix parser")
+      end
+      return real_language_add(lang)
+    end
+    finally(function()
+      vim.api.nvim_get_runtime_file = real_runtime_file
+      vim.treesitter.language.add = real_language_add
+    end)
+
+    check_with_opts({ parser_runtime_paths = { root } })
+
+    assert.is_true(any_match(recorded.warn, "`nix` tree%-sitter grammar not found"))
+  end)
+
   it("errors on an unsupported Neovim version", function()
     local real_has = vim.fn.has
     ---@diagnostic disable-next-line: duplicate-set-field

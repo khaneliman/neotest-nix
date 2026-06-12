@@ -1,5 +1,6 @@
 local M = {}
 
+local uv = vim.uv or vim.loop
 local health = vim.health
 
 ---@param name string
@@ -8,9 +9,43 @@ local function has_plugin(name)
   return (pcall(require, name))
 end
 
+---@return table
+local function active_opts()
+  local ok, adapter = pcall(require, "neotest-nix")
+  if not ok then
+    return {}
+  end
+
+  return adapter._opts or {}
+end
+
+---@param roots string[]?
 ---@return boolean
-local function nix_grammar_available()
+local function configured_nix_grammar_available(roots)
+  if roots == nil then
+    return false
+  end
+
+  for _, root in ipairs(roots) do
+    local parser = vim.fs.joinpath(root, "parser", "nix.so")
+    if
+      uv.fs_stat(parser) ~= nil and pcall(vim.treesitter.language.add, "nix", { path = parser })
+    then
+      return true
+    end
+  end
+
+  return false
+end
+
+---@param roots string[]?
+---@return boolean
+local function nix_grammar_available(roots)
   if #vim.api.nvim_get_runtime_file("parser/nix.so", true) > 0 then
+    return true
+  end
+
+  if configured_nix_grammar_available(roots) then
     return true
   end
 
@@ -29,12 +64,7 @@ local known_config_fields = {
 ---setup() rejects bad types outright, so the value here is catching unknown
 ---keys (which vim.validate ignores) and a config set without going through setup.
 local function check_config()
-  local ok, adapter = pcall(require, "neotest-nix")
-  if not ok then
-    return
-  end
-
-  local opts = adapter._opts or {}
+  local opts = active_opts()
   if next(opts) == nil then
     health.ok("using default configuration")
     return
@@ -89,6 +119,7 @@ end
 
 function M.check()
   health.start("neotest-nix")
+  local opts = active_opts()
 
   if vim.fn.has("nvim-0.11") == 1 then
     health.ok("Neovim >= 0.11")
@@ -123,7 +154,7 @@ function M.check()
     )
   end
 
-  if nix_grammar_available() then
+  if nix_grammar_available(opts.parser_runtime_paths) then
     health.ok("`nix` tree-sitter grammar available")
   else
     health.warn(
