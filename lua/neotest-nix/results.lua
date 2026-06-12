@@ -128,6 +128,13 @@ local nix_unit_markers = {
   ["\226\152\162"] = "failed", -- ☢ (radioactive sign, optionally + variation selector)
 }
 
+-- Summary lines are emitted once per run, e.g. "🎉 3/3 successful".
+-- Guard against legitimate detail lines containing the same fraction text.
+local nix_unit_summary_markers = {
+  ["\240\159\142\137"] = true, -- 🎉
+  ["\240\159\152\162"] = true, -- 😢
+}
+
 ---@param line string
 ---@return ("passed"|"failed")?, string?
 local function nix_unit_marker(line)
@@ -147,8 +154,13 @@ local function nix_unit_summary(line)
   -- e.g. "🎉 3/3 successful", "😢 1/3 successful", "error: Tests failed".
   -- Tolerate spacing drift so a summary line is never mistaken for a detail
   -- line and appended to the previous attribute's message.
-  return line:match("%d+/%d+%s+successful%s*$") ~= nil
-    or line:match("^%s*error:%s*Tests%s+failed%s*$") ~= nil
+  for glyph in pairs(nix_unit_summary_markers) do
+    if vim.startswith(line, glyph) then
+      return line:match("^" .. glyph .. "%s+%d+/%d+%s+successful%s*$") ~= nil
+    end
+  end
+
+  return line:match("^%s*error:%s*Tests%s+failed%s*$") ~= nil
 end
 
 ---@class neotest-nix.NixUnitEntry

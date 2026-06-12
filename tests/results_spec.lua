@@ -599,6 +599,18 @@ describe("nix-unit results", function()
     assert.are.equal("nested error: Tests failed downstream", entries[1].message)
   end)
 
+  it("keeps ratio-like detail lines inside attribute output", function()
+    local entries = results.parse_nix_unit(table.concat({
+      "\226\157\140 testA",
+      "retry batch 2/3 successful",
+      "",
+      "\240\159\152\162 3/3 successful",
+    }, "\n"))
+
+    assert.are.equal(1, #entries)
+    assert.are.equal("retry batch 2/3 successful", entries[1].message)
+  end)
+
   it("maps per-attribute results onto their positions", function()
     local root = project()
     local position_tree = unit_tree(root)
