@@ -39,11 +39,36 @@ function M.translate_store_path(path, root)
 end
 
 ---@param value string
+---@return string unwrapped
+---@return string prefix
+---@return string suffix
+local function strip_store_path_wrappers(value)
+  local prefix = value:match("^[%(\"'`]+")
+  local suffix = value:match("[%)%]}\"'`.,;:]+$")
+  local unwrapped = value
+
+  if prefix ~= nil then
+    unwrapped = unwrapped:sub(#prefix + 1)
+  end
+  if suffix ~= nil then
+    unwrapped = unwrapped:sub(1, #unwrapped - #suffix)
+  end
+
+  return unwrapped, prefix or "", suffix or ""
+end
+
+---@param value string
 ---@param root string
 ---@return string
 function M.translate_string(value, root)
   local translated = value:gsub("/nix/store/[^%s:]+%-source/[^%s:]+", function(store_path)
-    return M.translate_store_path(store_path, root)
+    local unwrapped_path, prefix, suffix = strip_store_path_wrappers(store_path)
+    local translated_path = M.translate_store_path(unwrapped_path, root)
+    if translated_path == unwrapped_path then
+      return prefix .. unwrapped_path .. suffix
+    end
+
+    return prefix .. translated_path .. suffix
   end)
   return translated
 end

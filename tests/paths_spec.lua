@@ -43,6 +43,30 @@ describe("paths", function()
     )
   end)
 
+  it("translates quoted store paths embedded in output strings", function()
+    local root = project()
+    local local_path = vim.fs.joinpath(root, "checks", "unit.nix")
+    local output = 'error: "' .. "/nix/store/abc123-source/checks/unit.nix" .. '":2:3'
+
+    assert.are.equal('error: "' .. local_path .. '":2:3', paths.translate_string(output, root))
+  end)
+
+  it("translates parenthesized store paths embedded in output strings", function()
+    local root = project()
+    local local_path = vim.fs.joinpath(root, "checks", "unit.nix")
+    local output = "error: (" .. "/nix/store/abc123-source/checks/unit.nix" .. ")"
+
+    assert.are.equal("error: (" .. local_path .. ")", paths.translate_string(output, root))
+  end)
+
+  it("translates comma-punctuated store paths embedded in output strings", function()
+    local root = project()
+    local local_path = vim.fs.joinpath(root, "checks", "unit.nix")
+    local output = "trace: " .. "/nix/store/abc123-source/checks/unit.nix" .. ", failed"
+
+    assert.are.equal("trace: " .. local_path .. ", failed", paths.translate_string(output, root))
+  end)
+
   it("mutates nested result tables", function()
     local root = project()
     local result = {
