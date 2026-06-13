@@ -1,4 +1,5 @@
 local discover = require("neotest-nix.discover")
+local eval = require("neotest-nix.eval")
 local process = require("neotest-nix.process")
 local results = require("neotest-nix.results")
 
@@ -88,7 +89,7 @@ end
 ---@param value string
 ---@return string
 local function nix_string(value)
-  return vim.json.encode(value)
+  return eval.nix_string_literal(value)
 end
 
 ---@param attr string
@@ -112,13 +113,13 @@ end
 ---@return string
 local function nix_unit_select_expr(flake, leaf)
   local output = flake:gsub("^%.#", "")
-  local path = vim.json.encode(vim.split(output, ".", { plain = true }))
-  local name = vim.json.encode(leaf)
+  local path = eval.nix_string_literal(vim.json.encode(vim.split(output, ".", { plain = true })))
+  local name = eval.nix_string_literal(vim.json.encode(leaf))
   return ([[
 let
   flake = builtins.getFlake (toString ./. );
-  root = builtins.foldl' (acc: seg: acc.${seg}) flake (builtins.fromJSON ''%s'');
-  name = builtins.fromJSON ''%s'';
+  root = builtins.foldl' (acc: seg: acc.${seg}) flake (builtins.fromJSON %s);
+  name = builtins.fromJSON %s;
   pathName = path: builtins.concatStringsSep "." path;
   find = path: set:
     builtins.concatMap (

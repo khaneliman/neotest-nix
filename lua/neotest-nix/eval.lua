@@ -112,6 +112,17 @@ local function flake_cache_key(root, test_names)
   return root .. "\0" .. table.concat(sorted, "\0")
 end
 
+---Render a Lua string as a Nix double-quoted string literal. JSON encoding
+---alone is not safe to splice into Nix source: Nix expands `${...}` inside
+---`"..."` strings (and `''` terminates indented strings), and JSON escapes
+---neither sequence.
+---@param value string
+---@return string
+function M.nix_string_literal(value)
+  local escaped = value:gsub('[\\"]', "\\%0"):gsub("%${", "\\${")
+  return '"' .. escaped .. '"'
+end
+
 ---Nix expression that returns the names of the flake's top-level outputs whose
 ---candidate output contains every one of `test_names` as nix-unit leaves. The
 ---applied nix-unit suite (e.g. the `tests` output) can expose tests directly
@@ -121,11 +132,11 @@ end
 ---@param test_names string[]
 ---@return string
 function M.nix_unit_flake_expr(test_names)
-  local json = vim.json.encode(test_names)
+  local json = M.nix_string_literal(vim.json.encode(test_names))
   return ([[
 let
   flake = builtins.getFlake (toString ./. );
-  testNames = builtins.fromJSON ''%s'';
+  testNames = builtins.fromJSON %s;
   isTest = v:
     builtins.isAttrs v
     && builtins.hasAttr "expr" v

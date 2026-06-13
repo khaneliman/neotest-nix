@@ -287,8 +287,8 @@ describe("nix-unit flake detection", function()
   it("builds an expression that filters outputs by the suite's test names", function()
     local expr = eval.nix_unit_flake_expr({ "testFoo", "testBar" })
 
-    -- names are embedded as JSON so nix-unit attribute names need no escaping
-    assert.is_truthy(expr:find('["testFoo","testBar"]', 1, true))
+    -- names are embedded as JSON inside a Nix string literal
+    assert.is_truthy(expr:find([=["[\"testFoo\",\"testBar\"]"]=], 1, true))
     -- only outputs containing every nix-unit test attribute qualify, including
     -- outputs that nest tests under generated runtime namespaces.
     assert.is_truthy(expr:find("builtins.all", 1, true))
@@ -302,6 +302,16 @@ describe("nix-unit flake detection", function()
     assert.is_truthy(expr:find("isDerivation", 1, true))
     assert.is_truthy(expr:find("builtins.getFlake", 1, true))
     assert.is_nil(expr:find("ignoredOutputs", 1, true))
+  end)
+
+  it("escapes nix string syntax in embedded test names", function()
+    local expr = eval.nix_unit_flake_expr({ "test''${evil}" })
+
+    -- `''` would terminate a Nix indented string and `${` would interpolate;
+    -- both must reach builtins.fromJSON escaped inside a double-quoted literal.
+    assert.is_truthy(
+      expr:find([=[testNames = builtins.fromJSON "[\"test''\${evil}\"]";]=], 1, true)
+    )
   end)
 
   it("caches detected outputs by root and suite names", function()
