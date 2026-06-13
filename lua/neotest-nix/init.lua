@@ -1,4 +1,5 @@
 local discover = require("neotest-nix.discover")
+local display = require("neotest-nix.display")
 local eval = require("neotest-nix.eval")
 local parser = require("neotest-nix.parser")
 local positions = require("neotest-nix.positions")
@@ -63,7 +64,7 @@ function M.discover_positions(file_path)
     end
   end
 
-  return tree
+  return display.label_tree(tree, file_path)
 end
 
 ---Validate user-supplied config, failing fast with the offending field path.
