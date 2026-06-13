@@ -41,6 +41,17 @@ describe("discover", function()
     end
   end)
 
+  it("finds the root for missing absolute paths under an existing flake", function()
+    local project = vim.fs.joinpath(tmp, "project")
+    mkdir(project)
+    write_file(vim.fs.joinpath(project, "flake.nix"), { "{}" })
+
+    assert.are.equal(
+      project,
+      discover.root(vim.fs.joinpath(project, "missing", "example_test.nix"))
+    )
+  end)
+
   it("matches flake and nix-unit test files", function()
     local nix_unit = { "{", "  testFoo = {", "    expr = 1;", "    expected = 1;", "  };", "}" }
     local empty = { "{ }" }

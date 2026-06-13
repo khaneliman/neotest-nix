@@ -32,6 +32,12 @@ local function dirname(path)
   return vim.fs.dirname(vim.fs.normalize(path))
 end
 
+---@param path string
+---@return boolean
+local function is_absolute_path(path)
+  return path:match("^/") ~= nil or path:match("^[A-Za-z]:[/\\]") ~= nil
+end
+
 ---@param content string
 ---@return string
 local function strip_nix_comments_and_strings(content)
@@ -129,11 +135,28 @@ function M.root(dir)
   if path_exists(normalized) then
     start = normalized
   else
-    local parent = dirname(normalized)
-    if parent == nil or parent == "" or not path_exists(parent) then
+    if not is_absolute_path(normalized) then
+      local parent = dirname(normalized)
+      if parent == nil or parent == "" or not path_exists(parent) then
+        return nil
+      end
+      start = parent
+    else
+      start = dirname(normalized)
+    end
+
+    while start ~= nil and start ~= "" and not path_exists(start) do
+      local parent = dirname(start)
+      if parent == nil or parent == start then
+        start = nil
+        break
+      end
+      start = parent
+    end
+
+    if start == nil or start == "" then
       return nil
     end
-    start = parent
   end
 
   if is_file(start) then
