@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.1.6](https://github.com/khaneliman/neotest-nix/compare/v2.1.5...v2.1.6) (2026-06-13)
+
+
+### Bug Fixes
+
+* **config:** validate nested option entries ([cec262b](https://github.com/khaneliman/neotest-nix/commit/cec262b8a37a5d4407e5f2137d99f926f364131c))
+* **discover:** avoid false test file discovery ([1fadbf9](https://github.com/khaneliman/neotest-nix/commit/1fadbf9fd9c1e7dd4457218758c5073a6680176e))
+* **discover:** resolve synthetic absolute paths ([15afbb8](https://github.com/khaneliman/neotest-nix/commit/15afbb884dfe2f8324a8a9d1617a3076d2f53a27))
+* **discovery:** handle rec and dotted checks ([ed5ab49](https://github.com/khaneliman/neotest-nix/commit/ed5ab495af06c0a7cbee2fb214423e975cf6e10a))
+* **health:** honor parser runtime paths ([2cc8cdc](https://github.com/khaneliman/neotest-nix/commit/2cc8cdc427b1fc29f7ca741a3d1fab2ef8642eba))
+* **paths:** translate punctuated store paths ([7b8af4c](https://github.com/khaneliman/neotest-nix/commit/7b8af4ceb01e76f27be4ffa731477010b91fd774))
+* **process:** handle output file open failure ([5bb7c71](https://github.com/khaneliman/neotest-nix/commit/5bb7c71b6ee373e8735f0ecad4435cd3f76ee478))
+* **results:** preserve nix-unit detail output ([01cc5f2](https://github.com/khaneliman/neotest-nix/commit/01cc5f2163a618948895b4ee245774ee2c54bdea))
+* **results:** preserve nix-unit diagnostics ([7b20a69](https://github.com/khaneliman/neotest-nix/commit/7b20a6935bd2f3d46cb8bbe3e4c99da8f5ee0aca))
+* **spec:** escape nix string syntax in generated expressions ([8b6c6a6](https://github.com/khaneliman/neotest-nix/commit/8b6c6a6678f48a07362245ff493257a54da35aae))
+* **summary:** disambiguate flake roots ([3d3ffda](https://github.com/khaneliman/neotest-nix/commit/3d3ffda6f896ea70a8802912396a65af98a26aff))
+
 ## [2.1.5](https://github.com/khaneliman/neotest-nix/compare/v2.1.4...v2.1.5) (2026-06-08)
 
 
