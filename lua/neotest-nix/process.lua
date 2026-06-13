@@ -2,6 +2,34 @@ local nio = require("nio")
 
 local M = {}
 
+---@param message string
+---@return neotest.Process
+local function completed_failure(message)
+  return {
+    attach = function() end,
+    is_complete = function()
+      return true
+    end,
+    output = function()
+      return message
+    end,
+    output_stream = function()
+      local sent = false
+      return function()
+        if sent then
+          return nil
+        end
+        sent = true
+        return message
+      end
+    end,
+    result = function()
+      return 1
+    end,
+    stop = function() end,
+  }
+end
+
 ---@param command string[]
 ---@param err any
 ---@return string
@@ -21,7 +49,12 @@ end
 function M.strategy(spec)
   local output_path = nio.fn.tempname()
   ---@type file*?
-  local output_file = assert(io.open(output_path, "w"))
+  local output_file, open_err = io.open(output_path, "w")
+  if output_file == nil then
+    return completed_failure(
+      ("neotest-nix: failed to open output file `%s`: %s"):format(output_path, tostring(open_err))
+    )
+  end
 
   local finish = nio.control.future()
   local output_finish = nio.control.future()

@@ -69,4 +69,48 @@ describe("process", function()
     assert.is_nil(failed)
     assert.is_true(done)
   end)
+
+  it("reports output file open failures as a completed process", function()
+    local done = false
+    local failed
+
+    nio.run(function()
+      local original_tempname = nio.fn.tempname
+      local missing_path = vim.fs.joinpath(vim.fn.tempname(), "missing", "output")
+      nio.fn.tempname = function()
+        return missing_path
+      end
+
+      local ok, proc = pcall(process.strategy, {
+        command = { "sh", "-c", "exit 0" },
+      })
+      nio.fn.tempname = original_tempname
+
+      local stream = ok and proc.output_stream() or nil
+      local message = stream and stream() or nil
+      local ok_assert, err = pcall(function()
+        assert.is_true(ok)
+        if not ok then
+          error(proc)
+        end
+        if stream == nil or message == nil then
+          error("missing completed failure stream")
+        end
+        assert.are.equal(1, proc.result())
+        assert.is_true(proc.is_complete())
+        assert.is_truthy(message:find("failed to open output file", 1, true))
+        assert.is_truthy(message:find(missing_path, 1, true))
+        assert.are.equal(message, proc.output())
+        assert.is_nil(stream())
+      end)
+      failed = not ok_assert and err or nil
+      done = true
+    end)
+
+    vim.wait(1000, function()
+      return done
+    end)
+    assert.is_nil(failed)
+    assert.is_true(done)
+  end)
 end)
