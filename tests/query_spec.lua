@@ -1,6 +1,5 @@
-local function parse_file(fixture, file_path)
+local function parse_source(source, file_path)
   local query = table.concat(vim.fn.readfile("queries/nix/neotest-nix.scm"), "\n")
-  local source = table.concat(vim.fn.readfile(fixture), "\n")
   local parsed_query = vim.treesitter.query.parse("nix", query)
   local root = vim.treesitter.get_string_parser(source, "nix"):parse()[1]:root()
   local positions = {}
@@ -19,6 +18,10 @@ local function parse_file(fixture, file_path)
   end
 
   return positions
+end
+
+local function parse_file(fixture, file_path)
+  return parse_source(table.concat(vim.fn.readfile(fixture), "\n"), file_path)
 end
 
 local function parse_fixture()
@@ -89,6 +92,49 @@ describe("nix query", function()
 
     assert.is_not_nil(find_position(positions, "testLibrary"))
     assert.is_not_nil(find_position(positions, "libraryCase"))
+  end)
+
+  it("discovers nix-unit assertions whose value is recursive", function()
+    local positions = parse_source(
+      table.concat({
+        "{",
+        "  testRecursive = rec {",
+        "    expr = 1;",
+        "    expected = 1;",
+        "  };",
+        "}",
+      }, "\n"),
+      "recursive-tests.nix"
+    )
+
+    local position = find_position(positions, "testRecursive")
+    assert.is_not_nil(position)
+    assert.are.equal("nix-unit", position.runner)
+    assert.are.equal("testRecursive", position.attr_path)
+  end)
+
+  it("keeps system namespaces for dotted checks attrpaths", function()
+    local positions = parse_source(
+      table.concat({
+        "{",
+        "  outputs = { self }: {",
+        "    checks.x86_64-linux = {",
+        "      unit = true;",
+        "    };",
+        "  };",
+        "}",
+      }, "\n"),
+      "flake.nix"
+    )
+
+    local checks = find_position(positions, "checks")
+    local system = find_position(positions, "x86_64-linux")
+    local unit = find_position(positions, "unit")
+
+    assert.are.equal("namespace", checks.type)
+    assert.are.equal("namespace", system.type)
+    assert.are.equal("test", unit.type)
+    assert.are.equal("checks.x86_64-linux.unit", unit.attr_path)
   end)
 
   it("marks flake.nix nix-unit suites as flake-reachable", function()

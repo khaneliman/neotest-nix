@@ -116,12 +116,19 @@ local function is_nix_unit_test(parts)
   return #parts >= 1 and parts[1] ~= "checks" and parts[#parts] ~= "tests"
 end
 
+---@param node TSNode
+---@return boolean
+local function is_attrset_node(node)
+  local node_type = node:type()
+  return node_type == "attrset_expression" or node_type == "rec_attrset_expression"
+end
+
 ---@param binding TSNode
 ---@param source string
 ---@return boolean
 local function is_nix_unit_value(binding, source)
   local expression = binding_expression(binding)
-  if expression == nil or expression:type() ~= "attrset_expression" then
+  if expression == nil or not is_attrset_node(expression) then
     return false
   end
 
@@ -195,8 +202,9 @@ end
 ---@param binding TSNode
 ---@param source string
 ---@return boolean
-local function has_checks_ancestor(binding, source)
-  local current = binding:parent()
+local function has_checks_context(binding, source)
+  ---@type TSNode?
+  local current = binding
 
   while current ~= nil do
     if current:type() == "binding" then
@@ -269,15 +277,21 @@ function M.build_position(file_path, source, captured_nodes)
     local name = vim.treesitter.get_node_text(namespace_name, source)
     local binding = containing_binding(namespace_name)
     local parts = binding ~= nil and binding_attrpath_parts(binding, source) or {}
+    local definition = captured_nodes["namespace.definition"]
+    if definition == nil then
+      return nil
+    end
+
     local is_outputs = name == "outputs" and parts[1] == "outputs"
-    local is_checks = name == "checks" and parts[1] == "checks" and #parts == 1
+    local is_checks = name == "checks"
+      and parts[1] == "checks"
+      and (#parts == 1 or (#parts == 2 and is_attrset_node(definition)))
     local is_tests = name == "tests" and parts[1] == "tests" and #parts == 1
     local is_system = name:match(system_pattern) ~= nil
       and binding ~= nil
-      and has_checks_ancestor(binding, source)
+      and has_checks_context(binding, source)
 
     if is_outputs or is_checks or is_tests or is_system then
-      local definition = captured_nodes["namespace.definition"]
       -- neotest assigns `id` after build_position returns, so the partial
       -- position legitimately omits it.
       ---@diagnostic disable-next-line: return-type-mismatch

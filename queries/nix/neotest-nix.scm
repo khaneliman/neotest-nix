@@ -23,7 +23,10 @@
 (binding
   attrpath: (attrpath
     (identifier) @namespace.name)
-  expression: (attrset_expression) @namespace.definition
+  expression: [
+    (attrset_expression)
+    (rec_attrset_expression)
+  ] @namespace.definition
   (#match? @namespace.name "^[a-z0-9_]+-[a-z0-9_]+$"))
 
 (binding
