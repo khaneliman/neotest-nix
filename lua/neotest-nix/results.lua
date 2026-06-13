@@ -5,6 +5,13 @@ local M = {}
 
 local uv = vim.uv or vim.loop
 
+---@param text string
+---@return string
+local function strip_ansi(text)
+  local stripped = text:gsub("\27%[[0-?]*[ -/]*[@-~]", "")
+  return stripped
+end
+
 ---@param path string
 ---@return string?
 local function read_file(path)
@@ -25,6 +32,7 @@ end
 ---@param line string
 ---@return string?
 local function parse_error_line(line)
+  line = strip_ansi(line)
   local parsed = line:match("^%s*error:%s*(.*)$")
   if parsed == nil then
     return nil
@@ -38,22 +46,35 @@ local function parse_error_line(line)
   return trimmed
 end
 
+local nix_unit_marker
+local nix_unit_summary
+
 ---@param output string
 ---@return string
-local function error_message(output)
-  local message
+local function failure_message(output)
+  local lines = {}
+  local collecting = false
 
   for line in output:gmatch("[^\r\n]+") do
+    line = strip_ansi(line)
     local parsed = parse_error_line(line)
-    if parsed ~= nil then
-      -- The first non-empty `error:` line is the underlying cause; later lines
-      -- are usually the generic "build of '...' failed" wrapper.
-      message = parsed
-      break
+    if not collecting and parsed ~= nil then
+      table.insert(lines, parsed)
+      collecting = true
+    elseif collecting then
+      local status = nix_unit_marker(line)
+      if status ~= nil or nix_unit_summary(line) then
+        break
+      end
+      table.insert(lines, line)
     end
   end
 
-  return message or "Nix command failed"
+  if #lines == 0 then
+    return "Nix command failed"
+  end
+
+  return vim.trim(table.concat(lines, "\n"))
 end
 
 ---@param path string
@@ -96,6 +117,7 @@ function M.parse_errors(output, root)
   local current_message
 
   for line in output:gmatch("[^\r\n]+") do
+    line = strip_ansi(line)
     local parsed = parse_error_line(line)
     if parsed ~= nil then
       current_message = parsed
@@ -106,7 +128,7 @@ function M.parse_errors(output, root)
       local translated = local_error_path(path, root)
       if translated ~= nil then
         table.insert(errors, {
-          message = current_message or error_message(output),
+          message = current_message or failure_message(output),
           path = translated,
           line = tonumber(row) - 1,
           column = tonumber(column) - 1,
@@ -137,12 +159,18 @@ local nix_unit_summary_markers = {
 
 ---@param line string
 ---@return ("passed"|"failed")?, string?
-local function nix_unit_marker(line)
+nix_unit_marker = function(line)
+  line = strip_ansi(line)
   for glyph, status in pairs(nix_unit_markers) do
     if vim.startswith(line, glyph) then
-      -- Skip the glyph (and any trailing variation selector) and read the name.
-      local name = line:sub(#glyph + 1):match("[%w_%.'%-]+")
-      return status, name
+      -- Skip the glyph and optional variation selector; nix-unit may print
+      -- runtime-prefixed names that include separators outside Lua identifiers.
+      local rest = line:sub(#glyph + 1):gsub("^\239\184\143", "", 1)
+      local name = vim.trim(rest)
+      if name ~= "" then
+        return status, name
+      end
+      return status, nil
     end
   end
   return nil, nil
@@ -150,7 +178,8 @@ end
 
 ---@param line string
 ---@return boolean
-local function nix_unit_summary(line)
+nix_unit_summary = function(line)
+  line = strip_ansi(line)
   -- e.g. "🎉 3/3 successful", "😢 1/3 successful", "error: Tests failed".
   -- Tolerate spacing drift so a summary line is never mistaken for a detail
   -- line and appended to the previous attribute's message.
@@ -186,6 +215,7 @@ function M.parse_nix_unit(output)
   end
 
   for line in (output .. "\n"):gmatch("(.-)\n") do
+    line = strip_ansi(line)
     local status, name = nix_unit_marker(line)
     if status ~= nil and name ~= nil then
       flush()
@@ -348,17 +378,29 @@ end
 ---@param tree neotest.Tree
 ---@param output string
 ---@param code integer
+---@param root string
+---@param spec neotest.RunSpec
 ---@return table<string, neotest.Result>
-local function nix_unit_results(tree, output, code)
-  local entries = M.parse_nix_unit(output)
+local function nix_unit_results(tree, output, code, root, spec)
+  local clean_output = strip_ansi(output)
+  local entries = M.parse_nix_unit(clean_output)
   local root_id = tree:data().id
 
   if #entries == 0 then
     -- No per-attribute lines (e.g. a top-level eval error before any test ran).
     if code == 0 then
-      return { [root_id] = { status = "passed", short = output } }
+      return { [root_id] = { status = "passed", short = clean_output } }
     end
-    return { [root_id] = { status = "failed", short = error_message(output), errors = {} } }
+
+    local parsed = M.parse_errors(clean_output, root)
+    local results = {
+      [root_id] = { status = "failed", short = failure_message(clean_output), errors = {} },
+    }
+    local positions = test_positions(tree)
+    for _, error in ipairs(parsed) do
+      add_error(results, result_id_for_error(tree, spec, error, positions), error)
+    end
+    return results
   end
 
   local positions = test_positions(tree)
@@ -439,7 +481,7 @@ local function nix_unit_results(tree, output, code)
   end
 
   if results[root_id] == nil then
-    results[root_id] = { status = any_failed and "failed" or "passed", short = output }
+    results[root_id] = { status = any_failed and "failed" or "passed", short = clean_output }
   end
 
   return results
@@ -451,11 +493,11 @@ end
 ---@return table<string, neotest.Result>
 function M.results(spec, result, tree)
   local root = spec.cwd or uv.cwd() or "."
-  local output = read_file(result.output) or result.output or ""
+  local output = read_file(result.output) or ""
   output = paths.translate_string(output, root)
 
   if spec.context ~= nil and spec.context.runner == "nix-unit" then
-    return nix_unit_results(tree, output, result.code)
+    return nix_unit_results(tree, output, result.code, root, spec)
   end
 
   if result.code == 0 then
@@ -479,7 +521,7 @@ function M.results(spec, result, tree)
   if vim.tbl_isempty(results) then
     results[tree:data().id] = {
       status = "failed",
-      short = error_message(output),
+      short = failure_message(output),
       errors = {},
     }
   end

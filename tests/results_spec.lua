@@ -326,6 +326,19 @@ describe("results", function()
     assert.are.equal("Nix command failed", parsed[position_tree:data().id].short)
   end)
 
+  it("does not treat a missing output path as command output", function()
+    local root = project()
+    local position_tree = tree(root)
+    local missing_path = vim.fs.joinpath(root, "missing-output")
+    local parsed = results.results(run_spec(root), {
+      code = 1,
+      output = missing_path,
+    }, position_tree)
+
+    assert.are.equal("failed", parsed[position_tree:data().id].status)
+    assert.are.equal("Nix command failed", parsed[position_tree:data().id].short)
+  end)
+
   it("skips whitespace-only error lines when choosing a message", function()
     local root = project()
     local position_tree = tree(root)
@@ -564,6 +577,33 @@ describe("nix-unit results", function()
     assert.is_truthy(by_name.testFailEval.message:match("error: NO U"))
   end)
 
+  it("strips ANSI escapes before parsing markers and summaries", function()
+    local entries = results.parse_nix_unit(table.concat({
+      "\27[32m\226\156\133 testPass\27[0m",
+      "\226\157\140 \27[31mtestFail\27[0m",
+      "\27[31m1 != 2\27[0m",
+      "\27[31m\240\159\152\162 1/2 successful\27[0m",
+    }, "\n"))
+
+    assert.are.equal(2, #entries)
+    assert.are.equal("testPass", entries[1].name)
+    assert.are.equal("passed", entries[1].status)
+    assert.are.equal("testFail", entries[2].name)
+    assert.are.equal("failed", entries[2].status)
+    assert.are.equal("1 != 2", entries[2].message)
+  end)
+
+  it("keeps full nix-unit marker names with runtime separators", function()
+    local entries = results.parse_nix_unit(table.concat({
+      "\226\157\140 systems:x/test+name with space",
+      "boom",
+      "\240\159\152\162 0/1 successful",
+    }, "\n"))
+
+    assert.are.equal(1, #entries)
+    assert.are.equal("systems:x/test+name with space", entries[1].name)
+  end)
+
   it("treats a summary line with spacing drift as a summary, not detail", function()
     local entries = results.parse_nix_unit(table.concat({
       "\226\156\133 testA",
@@ -626,6 +666,46 @@ describe("nix-unit results", function()
     assert.are.equal("{ x = 1; } != { y = 1; }", parsed.testFail.errors[1].message)
     -- the suite node reflects the overall failure
     assert.are.equal("failed", parsed[position_tree:data().id].status)
+  end)
+
+  it("marks markerless successful nix-unit output at the root", function()
+    local root = project()
+    local position_tree = unit_tree(root)
+    local parsed = results.results(run_spec(root, { runner = "nix-unit" }), {
+      code = 0,
+      output = output_file({ "no test markers emitted" }),
+    }, position_tree)
+
+    assert.are.equal("passed", parsed[position_tree:data().id].status)
+    assert.are.equal("no test markers emitted", vim.trim(parsed[position_tree:data().id].short))
+  end)
+
+  it("preserves markerless nix-unit failures and local diagnostics", function()
+    local root = project()
+    local position_tree = tree(root)
+    local parsed = results.results(run_spec(root, { runner = "nix-unit" }), {
+      code = 1,
+      output = output_file({
+        "error: attribute 'foo' missing",
+        "       at /nix/store/abc123-source/checks/unit.nix:2:3:",
+        "          1| first",
+        "          2| second",
+        "           |   ^",
+      }),
+    }, position_tree)
+
+    local root_result = parsed[position_tree:data().id]
+    assert.are.equal("failed", root_result.status)
+    assert.is_truthy(root_result.short:find("attribute 'foo' missing", 1, true))
+    assert.is_truthy(root_result.short:find(vim.fs.joinpath(root, "checks", "unit.nix"), 1, true))
+    assert.is_truthy(root_result.short:find("2| second", 1, true))
+    assert.are.equal("failed", parsed.unit.status)
+    assert.are.same({
+      message = "attribute 'foo' missing",
+      line = 1,
+      column = 2,
+      severity = vim.diagnostic.severity.ERROR,
+    }, parsed.unit.errors[1])
   end)
 
   it("maps dotted nix-unit names onto nested positions by attr_path", function()
