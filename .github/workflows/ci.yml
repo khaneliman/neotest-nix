@@ -12,12 +12,21 @@ concurrency:
 
 jobs:
   flake-check:
-    name: nix flake check (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: nix flake check (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - name: x86_64-linux
+            runner: ubuntu-latest
+            system: x86_64-linux
+          - name: aarch64-linux
+            runner: ubuntu-24.04-arm
+            system: aarch64-linux
+          - name: aarch64-darwin
+            runner: macos-latest
+            system: aarch64-darwin
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +51,7 @@ jobs:
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
       - name: Build plugin package
-        run: nix build .#neotest-nix --print-build-logs
+        run: nix build --system ${{ matrix.system }} .#neotest-nix --print-build-logs
 
       - name: Run flake checks
-        run: nix flake check --print-build-logs
+        run: nix flake check --print-build-logs --system ${{ matrix.system }}
