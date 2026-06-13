@@ -138,6 +138,13 @@ describe("config validation", function()
     vim.opt.runtimepath:prepend(vim.fn.getcwd())
   end)
 
+  local function setup_error(opts)
+    local adapter = require("neotest-nix")
+    local ok, err = pcall(adapter.setup, opts)
+    assert.is_false(ok)
+    return tostring(err)
+  end
+
   it("accepts a fully specified config", function()
     local adapter = require("neotest-nix")
     assert.has_no.errors(function()
@@ -145,6 +152,7 @@ describe("config validation", function()
         parser_runtime_paths = { "/tmp/nix-parser" },
         discover_eval_checks = true,
         eval_outputs = { { attr = "checks", match = "^test" } },
+        nix_unit_flakes = { { path = "lib/tests", flake = ".#tests" } },
       })
     end)
   end)
@@ -165,12 +173,49 @@ describe("config validation", function()
     end)
   end)
 
+  it("rejects non-string parser_runtime_paths entries", function()
+    local err = setup_error({
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      parser_runtime_paths = { 42 },
+    })
+
+    assert.is_truthy(err:find("parser_runtime_paths[1]", 1, true))
+  end)
+
+  it("rejects non-table eval_outputs entries", function()
+    local err = setup_error({
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      eval_outputs = { false },
+    })
+
+    assert.is_truthy(err:find("eval_outputs[1]", 1, true))
+  end)
+
   it("rejects eval_outputs entries without an attr", function()
-    local adapter = require("neotest-nix")
-    assert.has_error(function()
+    local err = setup_error({
       ---@diagnostic disable-next-line: missing-fields
-      adapter.setup({ eval_outputs = { { match = "^test" } } })
-    end)
+      eval_outputs = { { match = "^test" } },
+    })
+
+    assert.is_truthy(err:find("eval_outputs[1].attr", 1, true))
+  end)
+
+  it("rejects non-table nix_unit_flakes entries", function()
+    local err = setup_error({
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      nix_unit_flakes = { false },
+    })
+
+    assert.is_truthy(err:find("nix_unit_flakes[1]", 1, true))
+  end)
+
+  it("rejects nix_unit_flakes entries without a flake", function()
+    local err = setup_error({
+      ---@diagnostic disable-next-line: missing-fields
+      nix_unit_flakes = { { path = "lib/tests" } },
+    })
+
+    assert.is_truthy(err:find("nix_unit_flakes[1].flake", 1, true))
   end)
 end)
 

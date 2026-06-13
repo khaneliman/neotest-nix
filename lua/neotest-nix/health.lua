@@ -27,11 +27,13 @@ local function configured_nix_grammar_available(roots)
   end
 
   for _, root in ipairs(roots) do
-    local parser = vim.fs.joinpath(root, "parser", "nix.so")
-    if
-      uv.fs_stat(parser) ~= nil and pcall(vim.treesitter.language.add, "nix", { path = parser })
-    then
-      return true
+    if type(root) == "string" then
+      local parser = vim.fs.joinpath(root, "parser", "nix.so")
+      if
+        uv.fs_stat(parser) ~= nil and pcall(vim.treesitter.language.add, "nix", { path = parser })
+      then
+        return true
+      end
     end
   end
 
@@ -82,6 +84,15 @@ local function check_config()
     elseif type(value) ~= expected then
       valid = false
       health.error(("config `%s` must be a %s, got %s"):format(key, expected, type(value)))
+    end
+  end
+
+  if type(opts.parser_runtime_paths) == "table" then
+    for index, root in ipairs(opts.parser_runtime_paths) do
+      if type(root) ~= "string" then
+        valid = false
+        health.error(("parser_runtime_paths[%d] must be a string"):format(index))
+      end
     end
   end
 

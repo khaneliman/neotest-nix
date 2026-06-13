@@ -64,6 +64,11 @@ describe("health config check", function()
     assert.is_true(any_match(recorded.warn, "unknown config key `discover_eval_check`"))
   end)
 
+  it("errors on a malformed parser_runtime_paths entry", function()
+    check_with_opts({ parser_runtime_paths = { false } })
+    assert.is_true(any_match(recorded.error, "parser_runtime_paths%[1%]"))
+  end)
+
   it("errors on a malformed eval_outputs entry", function()
     check_with_opts({ eval_outputs = { { match = "^t" } } })
     assert.is_true(any_match(recorded.error, "eval_outputs%[1%]"))

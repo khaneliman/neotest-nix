@@ -75,8 +75,15 @@ local function validate(opts)
   vim.validate("eval_outputs", opts.eval_outputs, "table", true)
   vim.validate("nix_unit_flakes", opts.nix_unit_flakes, "table", true)
 
+  if opts.parser_runtime_paths ~= nil then
+    for index, path in ipairs(opts.parser_runtime_paths) do
+      vim.validate(("parser_runtime_paths[%d]"):format(index), path, "string")
+    end
+  end
+
   if opts.eval_outputs ~= nil then
     for index, output in ipairs(opts.eval_outputs) do
+      vim.validate(("eval_outputs[%d]"):format(index), output, "table")
       vim.validate(("eval_outputs[%d].attr"):format(index), output.attr, "string")
       vim.validate(("eval_outputs[%d].match"):format(index), output.match, "string", true)
     end
@@ -84,6 +91,7 @@ local function validate(opts)
 
   if opts.nix_unit_flakes ~= nil then
     for index, entry in ipairs(opts.nix_unit_flakes) do
+      vim.validate(("nix_unit_flakes[%d]"):format(index), entry, "table")
       vim.validate(("nix_unit_flakes[%d].path"):format(index), entry.path, "string")
       vim.validate(("nix_unit_flakes[%d].flake"):format(index), entry.flake, "string")
     end
