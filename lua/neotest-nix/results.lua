@@ -3,7 +3,7 @@ local vm = require("neotest-nix.vm")
 
 local M = {}
 
-local uv = vim.uv or vim.loop
+local uv = vim.uv
 
 ---@param text string
 ---@return string

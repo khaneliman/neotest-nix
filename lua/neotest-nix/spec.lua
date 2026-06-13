@@ -5,7 +5,7 @@ local results = require("neotest-nix.results")
 
 local M = {}
 
-local uv = vim.uv or vim.loop
+local uv = vim.uv
 
 -- Matches a Nix system tuple (e.g. "x86_64-linux") as an attribute name.
 -- Shared with the position parser so discovery and run-spec agree on what

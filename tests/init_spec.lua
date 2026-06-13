@@ -13,7 +13,7 @@ describe("adapter", function()
 
     notify = vim.notify
     vim.notify = function() end
-    vim.opt.runtimepath:prepend(vim.loop.cwd())
+    vim.opt.runtimepath:prepend(vim.uv.cwd())
   end)
 
   after_each(function()
