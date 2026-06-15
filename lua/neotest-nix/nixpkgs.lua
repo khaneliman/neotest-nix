@@ -225,11 +225,15 @@ end
 ---are invisible to a static parse; eval-based enumeration is a later phase.
 ---@param root_node TSNode
 ---@param source string
----@return string[] names, table<string, integer[]> ranges
+---@return string[] names, table<string, integer[]> ranges, integer[]? tests_range
 local function collect_tests(root_node, source)
   local positions = require("neotest-nix.positions")
   local order = {}
   local ranges = {}
+  -- Range of the `tests` container binding itself (e.g. `passthru.tests = ...`),
+  -- used to anchor eval-discovered names when the value is computed and has no
+  -- per-member source location.
+  local tests_range
 
   ---@param binding TSNode
   local function consider(binding)
@@ -237,10 +241,16 @@ local function collect_tests(root_node, source)
     for index, segment in ipairs(parts) do
       if segment == "tests" then
         local prefix_ok = index == 1 or (index == 2 and parts[1] == "passthru")
-        local name = parts[index + 1]
-        if prefix_ok and name ~= nil and ranges[name] == nil then
-          ranges[name] = { binding:range() }
-          order[#order + 1] = name
+        if prefix_ok then
+          local name = parts[index + 1]
+          if name ~= nil then
+            if ranges[name] == nil then
+              ranges[name] = { binding:range() }
+              order[#order + 1] = name
+            end
+          elseif tests_range == nil then
+            tests_range = { binding:range() }
+          end
         end
         break
       end
@@ -258,7 +268,44 @@ local function collect_tests(root_node, source)
   end
 
   walk(root_node)
-  return order, ranges
+  return order, ranges, tests_range
+end
+
+-- Eval-discovered test names cached per file and invalidated by mtime, so
+-- re-discovery (e.g. on save) does not re-run nix-instantiate unless the file
+-- changed. Failures are also cached so false positives do not trigger retries
+-- on every discovery event.
+---@type table<string, { mtime: integer, names: string[]|false }>
+local eval_names_cache = {}
+
+---@param file_path string
+---@param root string
+---@param attr string
+---@return string[]?
+local function eval_test_names(file_path, root, attr)
+  local stat = uv.fs_stat(file_path)
+  local mtime = (stat ~= nil and stat.mtime ~= nil) and stat.mtime.sec or 0
+
+  local cached = eval_names_cache[file_path]
+  if cached ~= nil and cached.mtime == mtime then
+    return cached.names or nil
+  end
+
+  local log = require("neotest-nix.log")
+  local start = log.enabled() and uv.hrtime() or nil
+  local names = require("neotest-nix.eval").nixpkgs_test_names(root, attr)
+  if start ~= nil then
+    log.debug(
+      ("eval tests %s -> %s %.2fms"):format(
+        file_path,
+        names ~= nil and #names or "nil",
+        (uv.hrtime() - start) / 1e6
+      )
+    )
+  end
+
+  eval_names_cache[file_path] = { mtime = mtime, names = names or false }
+  return names
 end
 
 ---Build a position tree for a `pkgs/by-name` package file. The file node and a
@@ -296,7 +343,7 @@ function M.discover_positions(file_path, root, opts)
 
   local log = require("neotest-nix.log")
   local start = log.enabled() and uv.hrtime() or nil
-  local order, ranges = collect_tests(root_node, source)
+  local order, ranges, tests_range = collect_tests(root_node, source)
   if start ~= nil then
     log.debug(
       ("discover_positions %s -> %d tests %.2fms"):format(
@@ -305,6 +352,19 @@ function M.discover_positions(file_path, root, opts)
         (uv.hrtime() - start) / 1e6
       )
     )
+  end
+
+  -- Static parse found nothing, but the file declares passthru.tests (it passed
+  -- is_test_file): the entries are computed (e.g. `callPackages ./tests`). Fall
+  -- back to a legacy eval to enumerate them, when the user opts in.
+  if #order == 0 and opts ~= nil and opts.discover_nixpkgs_eval_tests then
+    local names = eval_test_names(file_path, root, attr)
+    if names ~= nil then
+      for _, name in ipairs(names) do
+        ranges[name] = tests_range or { 0, 0, 0, 0 }
+        order[#order + 1] = name
+      end
+    end
   end
 
   local tests_attr = attr .. ".tests"

@@ -231,6 +231,49 @@ function M.detect_nix_unit_flake(root, test_names)
   return flake
 end
 
+---Enumerate a Nixpkgs package's test attribute names via a legacy eval. Used as
+---a fallback when a static parse of `passthru.tests` finds nothing because the
+---entries are computed (e.g. `callPackages ./tests`). nix-instantiate evaluates
+---the working tree in place, so there is no flake copy-to-store; `--eval` only
+---evaluates, never builds. Returns nil on any eval failure so discovery falls
+---back to a single file node.
+---@param root string
+---@param attr string Top-level package attribute (e.g. "hello").
+---@return string[]?
+function M.nixpkgs_test_names(root, attr)
+  -- Mirror `nix-build -A`'s view of the tree: import the root expression and
+  -- auto-call it when it is a function (Nixpkgs' default.nix takes args), then
+  -- list `<attr>.tests`. `./.` resolves against the run cwd (the root), so this
+  -- evaluates the working tree in place with no flake copy-to-store.
+  local expr = ([[
+let
+  root = import ./.;
+  pkgs = if builtins.isFunction root then root { } else root;
+in
+  builtins.attrNames pkgs.%s.tests
+]]):format("${" .. M.nix_string_literal(attr) .. "}")
+
+  local command = {
+    "nix-instantiate",
+    "--eval",
+    "--strict",
+    "--json",
+    "--expr",
+    expr,
+  }
+
+  local result = run(command, root)
+  if result.code ~= 0 or result.stdout == nil or result.stdout == "" then
+    return nil
+  end
+
+  local ok, names = pcall(vim.json.decode, result.stdout)
+  if not ok or type(names) ~= "table" or #names == 0 then
+    return nil
+  end
+  return names
+end
+
 ---Find a descendant namespace by name in a `Tree:to_list` structure, where
 ---each node is `{ data, child_node... }`. Used to nest eval-discovered checks
 ---under the source-parsed namespace instead of a parallel duplicate.
