@@ -33,8 +33,8 @@ The Lua modules are deliberately small and single-purpose:
 - `positions.lua` — tree-sitter query loading and position building.
 - `eval.lua` — optional `nix eval` discovery of generated flake outputs.
 - `discover.lua` — root detection and "is this a test file?" rules.
-- `nixpkgs.lua` — Nixpkgs-checkout detection and legacy `nix-build` discovery
-  for `pkgs/by-name` package tests.
+- `nixpkgs.lua` — Nixpkgs-checkout detection and legacy discovery for
+  `pkgs/by-name` package tests, `lib/tests`, and `nixos/tests`.
 - `spec.lua` — turns a position into a `nix` / `nix build` / `nix-unit` run
   command.
 - `process.lua` — the run strategy (streams `vim.system` output to Neotest).

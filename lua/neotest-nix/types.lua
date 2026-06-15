@@ -121,7 +121,10 @@
 ---    without the usual markers) or `false` to disable it and treat the project
 ---    as a plain flake. When active, a `pkgs/by-name/<shard>/<name>/package.nix`
 ---    file exposes its `passthru.tests` entries, run with
----    `nix-build -A <name>.tests.<test>`.
+---    `nix-build -A <name>.tests.<test>`. Runnable `lib/tests/*.nix` entries
+---    are also exposed with their legacy `nix-build` or `nix-instantiate`
+---    command; eval-style `lib.runTests` files expose statically named tests as
+---    child nodes, while helper inputs under `lib/tests` are skipped.
 ---
 ---                                 *neotest-nix-config-discover_nixpkgs_eval_tests*
 ---`discover_nixpkgs_eval_tests`  `boolean?` (default `false`)
@@ -149,10 +152,20 @@
 ---    `discover_eval_checks` is enabled, flake outputs are additionally
 ---    enumerated via `nix eval` and merged into the tree, so checks generated at
 ---    evaluation time still show up.
----  - In a Nixpkgs checkout (see |neotest-nix-config-nixpkgs_mode|), a
----    `pkgs/by-name/<shard>/<name>/package.nix` file is a test file: its
----    `passthru.tests` members are parsed from source and run with
----    `nix-build -A <name>.tests.<test>`.
+---  - In a Nixpkgs checkout (see |neotest-nix-config-nixpkgs_mode|) the adapter
+---    also discovers, with legacy commands that evaluate the working tree in
+---    place:
+---      - `pkgs/by-name/<shard>/<name>/package.nix` — its `passthru.tests` run
+---        with `nix-build -A <name>.tests.<test>`.
+---      - runnable `lib/tests/*.nix` files — build-style entries such as
+---        `release.nix`, `maintainers.nix`, `teams.nix`, and `nix-unit.nix`
+---        use `nix-build`; eval-style entries such as `misc.nix`,
+---        `systems.nix`, and `fetchers.nix` use `nix-instantiate --eval`,
+---        where an empty result means all passed. Statically named
+---        `lib.runTests` members appear as child tests; running one evaluates
+---        the file and filters the failure list to that test name.
+---      - `nixos/tests/<name>.nix` — run with `nix-build -A nixosTests.<name>`,
+---        with VM test failures attributed to the `testScript` line.
 ---@brief ]]
 
 ---@mod neotest-nix.limitations Limitations
