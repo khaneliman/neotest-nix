@@ -75,6 +75,7 @@
 ---      eval_outputs = { { attr = "checks" } },
 ---      nix_unit_flakes = nil,
 ---      nixpkgs_mode = nil,
+---      discover_nixpkgs_eval_tests = false,
 ---    })
 ---<
 ---                                    *neotest-nix-config-parser_runtime_paths*
@@ -121,6 +122,17 @@
 ---    as a plain flake. When active, a `pkgs/by-name/<shard>/<name>/package.nix`
 ---    file exposes its `passthru.tests` entries, run with
 ---    `nix-build -A <name>.tests.<test>`.
+---
+---                                 *neotest-nix-config-discover_nixpkgs_eval_tests*
+---`discover_nixpkgs_eval_tests`  `boolean?` (default `false`)
+---    When a by-name package declares `passthru.tests` but the entries are
+---    computed (e.g. `callPackages ./tests`, `inherit`-ed), a source parse finds
+---    no names and the package shows as a single node that builds the whole
+---    `<name>.tests`. Enable this to evaluate the package with a legacy
+---    `nix-instantiate` and list the individual tests so each can be run on its
+---    own. Off by default because it shells out and evaluates the package; the
+---    eval runs lazily (only for such packages, on expand) and is cached per
+---    file. Only kicks in when the static parse finds nothing.
 ---@brief ]]
 
 ---@mod neotest-nix.discovery Discovery
@@ -217,5 +229,6 @@ local M = {}
 ---@field eval_outputs? neotest-nix.EvalOutput[] Outputs to enumerate when discovery is on.
 ---@field nix_unit_flakes? neotest-nix.NixUnitFlake[] Run wrapped nix-unit suites via a flake installable.
 ---@field nixpkgs_mode? boolean Force (true) or disable (false) legacy Nixpkgs handling; nil auto-detects.
+---@field discover_nixpkgs_eval_tests? boolean Eval a Nixpkgs package to enumerate computed passthru.tests.
 
 return M
