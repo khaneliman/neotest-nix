@@ -167,4 +167,40 @@ describe("discover", function()
     assert.is_false(discover.filter_dir("source", "source", "/nix/store/hash-source"))
     assert.is_true(discover.filter_dir("tests", "tests", tmp))
   end)
+
+  it("recognizes a by-name package in a Nixpkgs checkout", function()
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "lib"), "p")
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "nixos"), "p")
+    local pkg_dir = vim.fs.joinpath(tmp, "pkgs", "by-name", "he", "hello")
+    mkdir(pkg_dir)
+    local pkg = vim.fs.joinpath(pkg_dir, "package.nix")
+    write_file(pkg, { "{ stdenv }:", "stdenv.mkDerivation { passthru.tests.x = { }; }" })
+
+    -- A by-name package.nix is a test file even without test-named paths or a
+    -- nix-unit assertion, because the tree is Nixpkgs-shaped.
+    assert.is_true(discover.is_test_file(pkg))
+
+    -- The same file in a plain (non-Nixpkgs) tree is not a test file.
+    local plain_dir = vim.fn.tempname()
+    mkdir(plain_dir)
+    local plain = vim.fs.joinpath(plain_dir, "package.nix")
+    write_file(plain, { "{ stdenv }:", "stdenv.mkDerivation { }" })
+    assert.is_false(discover.is_test_file(plain))
+  end)
+
+  it("prunes unsupported directories on a Nixpkgs root", function()
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "lib"), "p")
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "nixos"), "p")
+    mkdir(vim.fs.joinpath(tmp, "pkgs", "by-name"))
+
+    assert.is_true(discover.filter_dir("pkgs", "pkgs", tmp))
+    assert.is_true(discover.filter_dir("by-name", "pkgs/by-name", tmp))
+    assert.is_false(discover.filter_dir("development", "pkgs/development", tmp))
+    assert.is_false(discover.filter_dir("lib", "lib", tmp))
+
+    -- nixpkgs_mode = false keeps the default behaviour (no pruning).
+    assert.is_true(
+      discover.filter_dir("development", "pkgs/development", tmp, { nixpkgs_mode = false })
+    )
+  end)
 end)

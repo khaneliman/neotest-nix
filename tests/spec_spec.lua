@@ -434,6 +434,28 @@ describe("spec", function()
     assert.are.same({ "testWrapped" }, seen_names)
   end)
 
+  it("runs nixpkgs passthru tests via legacy nix-build", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "pkgs", "by-name", "he", "hello", "package.nix")
+    local test = node({
+      id = path .. "::tests::simple",
+      name = "simple",
+      path = path,
+      type = "test",
+      runner = "nix",
+      nixpkgs_attr = "hello.tests.simple",
+    })
+
+    local run = build_spec({ tree = test })
+
+    assert.same({ "nix-build", "-A", "hello.tests.simple", "--no-out-link" }, run.command)
+    assert.are.equal("hello.tests.simple", run.context.attr)
+    assert.are.equal("nix", run.context.runner)
+    assert.are.equal(root, run.cwd)
+    -- nix-build output streams through the shared nix error scanner.
+    assert.is_function(run.stream)
+  end)
+
   it("does not build specs for directory positions", function()
     ---@type any
     local run_args = {
