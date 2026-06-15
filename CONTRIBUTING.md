@@ -33,6 +33,8 @@ The Lua modules are deliberately small and single-purpose:
 - `positions.lua` — tree-sitter query loading and position building.
 - `eval.lua` — optional `nix eval` discovery of generated flake outputs.
 - `discover.lua` — root detection and "is this a test file?" rules.
+- `nixpkgs.lua` — Nixpkgs-checkout detection and legacy `nix-build` discovery
+  for `pkgs/by-name` package tests.
 - `spec.lua` — turns a position into a `nix` / `nix build` / `nix-unit` run
   command.
 - `process.lua` — the run strategy (streams `vim.system` output to Neotest).
@@ -40,6 +42,8 @@ The Lua modules are deliberately small and single-purpose:
 - `parser.lua` — ensures the `nix` tree-sitter grammar is on the runtimepath.
 - `paths.lua` — translates `/nix/store/...-source` paths back to the worktree.
 - `vm.lua` — parses NixOS VM test (Python) tracebacks.
+- `log.lua` — opt-in debug logging and timing for the discovery hot paths
+  (`NEOTEST_NIX_DEBUG` / `vim.g.neotest_nix_debug`).
 - `types.lua` — annotation-only module: LuaCATS for the public config types and
   the user manual; the single source `vimcats` compiles into `doc/`.
 

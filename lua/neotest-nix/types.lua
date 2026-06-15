@@ -166,6 +166,21 @@
 ---    by `inherit` or computed at evaluation time are not listed. Running the
 ---    package file (or its `tests` group) still builds `<name>.tests`, which
 ---    covers them.
+---  - Only by-name packages that declare `passthru.tests` are treated as test
+---    files; the rest of Nixpkgs' packages are skipped so the tree stays small.
+---    On a checkout this large, also consider Neotest's own
+---    `discovery = { enabled = false }` so it processes open buffers instead of
+---    walking the whole tree.
+---@brief ]]
+
+---@mod neotest-nix.troubleshooting Troubleshooting
+---@brief [[
+---For slow or surprising discovery, enable debug logging by setting the
+---`NEOTEST_NIX_DEBUG` environment variable (to any non-empty value other than
+---`0`) or `vim.g.neotest_nix_debug = true` before discovery runs. The adapter
+---then records timing for each parsed file to `neotest-nix.log` under your
+---Neovim log directory (`:echo stdpath('log')`). This is the quickest way to
+---see how many files discovery touches and how long parsing each one costs.
 ---@brief ]]
 
 ---@mod neotest-nix.health Health
