@@ -202,6 +202,30 @@ local function has_nix_unit_assertion(file_path)
     )
 end
 
+---Whether package source declares `passthru.tests`. This runs for every one of
+---Nixpkgs' ~21k by-name packages, so it must stay on raw `string.find` (C-level)
+---rather than the O(n) Lua comment/string stripper. A false positive (the word
+---`tests` inside a comment or string) only yields a node that parses to zero
+---tests, which is harmless; the authoritative parse happens in
+---nixpkgs.discover_positions.
+---@param content string
+---@return boolean
+local function source_has_passthru_tests(content)
+  if content:find("tests", 1, true) == nil then
+    return false
+  end
+  if content:find("passthru%s*%.%s*tests") ~= nil then
+    return true
+  end
+  -- A `passthru = { ... }` block that binds `tests`.
+  return content:find("passthru", 1, true) ~= nil and content:find("tests%s*=") ~= nil
+end
+
+-- Gate results cached per file and invalidated by mtime. Neotest re-runs
+-- discovery on many events; without this every pass re-reads all ~21k packages.
+---@type table<string, { mtime: integer, result: boolean }>
+local passthru_cache = {}
+
 ---Cheap gate for a Nixpkgs `package.nix`: does it declare `passthru.tests`? The
 ---tree-sitter parse in nixpkgs.discover_positions is authoritative for the
 ---actual entries; this exists only to avoid turning every one of Nixpkgs' ~21k
@@ -215,6 +239,12 @@ local function has_passthru_tests(file_path)
     return false
   end
 
+  local mtime = stat.mtime ~= nil and stat.mtime.sec or 0
+  local cached = passthru_cache[file_path]
+  if cached ~= nil and cached.mtime == mtime then
+    return cached.result
+  end
+
   local file = io.open(file_path, "r")
   if file == nil then
     return false
@@ -225,20 +255,9 @@ local function has_passthru_tests(file_path)
     return false
   end
 
-  -- Fast reject before the O(n) comment/string stripper: the vast majority of
-  -- packages never mention `tests` at all, so a raw substring scan (C-level)
-  -- skips the expensive Lua strip for them.
-  if content:find("tests", 1, true) == nil then
-    return false
-  end
-
-  local search = strip_nix_comments_and_strings(content)
-  if search:match("passthru%s*%.%s*tests") ~= nil then
-    return true
-  end
-  -- A `passthru = { ... }` block that binds `tests`.
-  return search:match("%f[%w]passthru%f[%W]") ~= nil
-    and search:match("%f[%w]tests%f[%W]%s*=") ~= nil
+  local result = source_has_passthru_tests(content)
+  passthru_cache[file_path] = { mtime = mtime, result = result }
+  return result
 end
 
 ---@param file_path string

@@ -49,17 +49,40 @@ local function has_markers(dir)
   return result
 end
 
+-- Roots already resolved this session. Every file in a checkout shares one
+-- root, so a prefix check here collapses tens of thousands of upward walks
+-- (each of which normalizes and dirname-walks the whole path) into one.
+---@type string[]
+local known_roots = {}
+
 ---Walk upward from a file (or directory) to the nearest Nixpkgs root.
 ---@param file_path string
 ---@return string?
 function M.detect_root(file_path)
+  -- Fast path: paths from Neotest are already clean absolute paths, so try a
+  -- raw prefix match against known roots before paying for vim.fs.normalize
+  -- (which splits and rejoins the whole path) on every file.
+  for _, root in ipairs(known_roots) do
+    if file_path == root or file_path:sub(1, #root + 1) == root .. "/" then
+      return root
+    end
+  end
+
   local normalized = vim.fs.normalize(file_path)
+
+  for _, root in ipairs(known_roots) do
+    if normalized == root or normalized:sub(1, #root + 1) == root .. "/" then
+      return root
+    end
+  end
+
   local stat = uv.fs_stat(normalized)
   local dir = (stat ~= nil and stat.type == "directory") and normalized
     or vim.fs.dirname(normalized)
 
   while dir ~= nil and dir ~= "" do
     if has_markers(dir) then
+      known_roots[#known_roots + 1] = dir
       return dir
     end
     local parent = vim.fs.dirname(dir)
