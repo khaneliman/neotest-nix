@@ -234,24 +234,6 @@ describe("discover", function()
     assert.is_false(discover.is_test_file(helper))
   end)
 
-  it("recognizes lib and nixos test files in a Nixpkgs checkout", function()
-    vim.fn.mkdir(vim.fs.joinpath(tmp, "lib", "tests"), "p")
-    vim.fn.mkdir(vim.fs.joinpath(tmp, "nixos", "tests"), "p")
-    mkdir(vim.fs.joinpath(tmp, "pkgs", "by-name"))
-
-    local release = vim.fs.joinpath(tmp, "lib", "tests", "release.nix")
-    local nixos = vim.fs.joinpath(tmp, "nixos", "tests", "login.nix")
-    local helper = vim.fs.joinpath(tmp, "nixos", "tests", "make-test-python.nix")
-    write_file(release, { "{ }" })
-    write_file(nixos, { '{ testScript = ""; }' })
-    write_file(helper, { "{ }" })
-
-    assert.is_true(discover.is_test_file(release))
-    assert.is_true(discover.is_test_file(nixos))
-    -- infrastructure files are not tests
-    assert.is_false(discover.is_test_file(helper))
-  end)
-
   it("roots a nested sub-flake at the Nixpkgs top", function()
     -- Nixpkgs ships `lib/flake.nix`. Walking to the nearest flake.nix would
     -- root files under lib/ at that sub-flake, splitting the tree into a second
@@ -289,5 +271,22 @@ describe("discover", function()
     local plain_flake = vim.fs.joinpath(plain, "flake.nix")
     write_file(plain_flake, { "{}" })
     assert.is_true(discover.is_test_file(plain_flake))
+  end)
+
+  it("uses legacy lib discovery instead of generic nix-unit inside a Nixpkgs checkout", function()
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "lib", "tests"), "p")
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "nixos"), "p")
+    mkdir(vim.fs.joinpath(tmp, "pkgs", "by-name"))
+
+    local fetchers = vim.fs.joinpath(tmp, "lib", "tests", "fetchers.nix")
+    local helper = vim.fs.joinpath(tmp, "lib", "tests", "helper.nix")
+    write_file(fetchers, { "let runTests = x: x; in runTests [ ]" })
+    write_file(helper, { "{", "  testFoo = {", "    expr = 1;", "    expected = 1;", "  };", "}" })
+
+    assert.is_true(discover.is_test_file(fetchers))
+    -- A nix-unit-shaped helper under lib/tests would match the generic path
+    -- (parent dir is "tests"), but in a Nixpkgs checkout it must not be claimed:
+    -- that is what triggered a getFlake evaluation of the whole tree.
+    assert.is_false(discover.is_test_file(helper))
   end)
 end)

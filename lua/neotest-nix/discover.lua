@@ -289,34 +289,38 @@ function M.is_test_file(file_path, opts)
     return false
   end
 
-  -- Nixpkgs-style test files. Pre-filter on the cheap basename/path signals that
-  -- only ever appear in Nixpkgs, so the marker walk (resolve_root) stays off the
-  -- hot path for ordinary repos and irrelevant files.
-  if
-    filename == "package.nix"
+  -- A file qualifies as test-named when either the file itself or its
+  -- immediate parent directory is test-named (e.g. `tests/default.nix`).
+  local parent = vim.fs.basename(dirname(file_path))
+  local test_named = filename:lower():match("test") ~= nil
+    or (parent ~= nil and parent:lower():match("test") ~= nil)
+
+  -- Cheap signals for a file that could be a Nixpkgs test, used to keep the
+  -- marker walk (resolve_root) off the hot path for ordinary repos.
+  local nixpkgs_candidate = filename == "package.nix"
     or filename == "release.nix"
     or filename == "misc.nix"
     or file_path:find("/nixos/tests/", 1, true) ~= nil
-  then
+
+  if test_named or nixpkgs_candidate then
     local nixpkgs = require("neotest-nix.nixpkgs")
     local nixpkgs_root = nixpkgs.resolve_root(file_path, opts)
     if nixpkgs_root ~= nil then
+      -- Inside a Nixpkgs checkout only the recognized kinds are tests. The
+      -- generic flake/nix-unit path is suppressed: it would claim files like
+      -- lib/tests/fetchers.nix and trigger an expensive (and wrong) flake
+      -- evaluation via builtins.getFlake.
       local kind = nixpkgs.test_file_kind(file_path, nixpkgs_root)
       if kind == "by-name" then
         -- A package is a test file only when it declares passthru.tests.
         return has_passthru_tests(file_path)
-      elseif kind ~= nil then
-        return true
       end
+      return kind ~= nil
     end
   end
 
-  -- A file qualifies as test-named when either the file itself or its
-  -- immediate parent directory is test-named (e.g. `tests/default.nix`).
-  local parent = vim.fs.basename(dirname(file_path))
-  if
-    filename:lower():match("test") == nil and (parent == nil or parent:lower():match("test") == nil)
-  then
+  -- Generic nix-unit discovery (non-Nixpkgs projects).
+  if not test_named then
     return false
   end
 
