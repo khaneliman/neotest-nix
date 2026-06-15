@@ -60,6 +60,7 @@ local known_config_fields = {
   discover_eval_checks = "boolean",
   eval_outputs = "table",
   nix_unit_flakes = "table",
+  nixpkgs_mode = "boolean",
 }
 
 ---Inspect the active adapter configuration for typos and wrong-typed fields.

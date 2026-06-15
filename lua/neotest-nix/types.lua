@@ -74,6 +74,7 @@
 ---      discover_eval_checks = false,
 ---      eval_outputs = { { attr = "checks" } },
 ---      nix_unit_flakes = nil,
+---      nixpkgs_mode = nil,
 ---    })
 ---<
 ---                                    *neotest-nix-config-parser_runtime_paths*
@@ -108,6 +109,18 @@
 ---<
 ---    `path` may be absolute or relative to the flake root, and matches the file
 ---    itself or any directory containing it.
+---
+---                                            *neotest-nix-config-nixpkgs_mode*
+---`nixpkgs_mode`                `boolean?` (default `nil`)
+---    Controls Nixpkgs-style discovery, which runs tests with legacy commands
+---    (`nix-build -A`) that evaluate the working tree in place instead of copying
+---    the whole tree to the store like a flake build. Left unset, it auto-detects
+---    a Nixpkgs checkout (a tree with `pkgs/by-name`, `lib`, and `nixos` or
+---    `pkgs/top-level/all-packages.nix`). Set `true` to force it (e.g. on a fork
+---    without the usual markers) or `false` to disable it and treat the project
+---    as a plain flake. When active, a `pkgs/by-name/<shard>/<name>/package.nix`
+---    file exposes its `passthru.tests` entries, run with
+---    `nix-build -A <name>.tests.<test>`.
 ---@brief ]]
 
 ---@mod neotest-nix.discovery Discovery
@@ -124,6 +137,10 @@
 ---    `discover_eval_checks` is enabled, flake outputs are additionally
 ---    enumerated via `nix eval` and merged into the tree, so checks generated at
 ---    evaluation time still show up.
+---  - In a Nixpkgs checkout (see |neotest-nix-config-nixpkgs_mode|), a
+---    `pkgs/by-name/<shard>/<name>/package.nix` file is a test file: its
+---    `passthru.tests` members are parsed from source and run with
+---    `nix-build -A <name>.tests.<test>`.
 ---@brief ]]
 
 ---@mod neotest-nix.limitations Limitations
@@ -145,6 +162,10 @@
 ---    flake whose inputs are not locked the run fails with `cannot update
 ---    unlocked flake input`. Individual tests run via `--expr` and are not
 ---    affected. Commit a lock file to run suites.
+---  - Nixpkgs `passthru.tests` are discovered by a static parse, so tests added
+---    by `inherit` or computed at evaluation time are not listed. Running the
+---    package file (or its `tests` group) still builds `<name>.tests`, which
+---    covers them.
 ---@brief ]]
 
 ---@mod neotest-nix.health Health
@@ -180,5 +201,6 @@ local M = {}
 ---@field discover_eval_checks? boolean Evaluate the flake to discover generated outputs.
 ---@field eval_outputs? neotest-nix.EvalOutput[] Outputs to enumerate when discovery is on.
 ---@field nix_unit_flakes? neotest-nix.NixUnitFlake[] Run wrapped nix-unit suites via a flake installable.
+---@field nixpkgs_mode? boolean Force (true) or disable (false) legacy Nixpkgs handling; nil auto-detects.
 
 return M
