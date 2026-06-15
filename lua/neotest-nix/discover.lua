@@ -203,8 +203,9 @@ local function has_nix_unit_assertion(file_path)
 end
 
 ---@param file_path string
+---@param opts neotest-nix.Config?
 ---@return boolean
-function M.is_test_file(file_path)
+function M.is_test_file(file_path, opts)
   local filename = vim.fs.basename(file_path)
   if filename == "flake.nix" then
     return true
@@ -212,6 +213,16 @@ function M.is_test_file(file_path)
 
   if filename:match("%.nix$") == nil then
     return false
+  end
+
+  -- Nixpkgs-style test files (e.g. a `pkgs/by-name` package's tests). Gated on
+  -- the basename so the marker walk only runs for plausible candidates.
+  if filename == "package.nix" then
+    local nixpkgs = require("neotest-nix.nixpkgs")
+    local nixpkgs_root = nixpkgs.resolve_root(file_path, opts)
+    if nixpkgs_root ~= nil and nixpkgs.is_nixpkgs_test_file(file_path, nixpkgs_root) then
+      return true
+    end
   end
 
   -- A file qualifies as test-named when either the file itself or its
@@ -229,8 +240,9 @@ end
 ---@param name string
 ---@param rel_path string
 ---@param root string
+---@param opts neotest-nix.Config?
 ---@return boolean
-function M.filter_dir(name, rel_path, root)
+function M.filter_dir(name, rel_path, root, opts)
   if name == nil or name == "" then
     return false
   end
@@ -248,6 +260,13 @@ function M.filter_dir(name, rel_path, root)
     if name:match(pattern) then
       return false
     end
+  end
+
+  -- On a Nixpkgs root, prune everything outside the supported subtrees; the
+  -- full tree is far too large to walk exhaustively.
+  local nixpkgs = require("neotest-nix.nixpkgs")
+  if nixpkgs.is_root(root, opts) and not nixpkgs.should_descend(rel_path) then
+    return false
   end
 
   return true

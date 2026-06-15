@@ -19,9 +19,24 @@ M._opts = {}
 
 M.name = "neotest-nix"
 M.root = discover.root
-M.is_test_file = discover.is_test_file
-M.filter_dir = discover.filter_dir
 M.results = results.results
+
+-- Thread the active configuration through, mirroring `build_spec`, so the
+-- nixpkgs_mode override reaches discovery (and `nixpkgs_mode = false` can fully
+-- disable nixpkgs handling).
+---@param file_path string
+---@return boolean
+function M.is_test_file(file_path)
+  return discover.is_test_file(file_path, M._opts)
+end
+
+---@param name string
+---@param rel_path string
+---@param root string
+---@return boolean
+function M.filter_dir(name, rel_path, root)
+  return discover.filter_dir(name, rel_path, root, M._opts)
+end
 
 ---Build a run spec for the given position, threading the active configuration
 ---through so the wrapping-check fallback (`nix_unit_checks`) is honoured.
@@ -42,6 +57,15 @@ M._merge_eval_outputs = eval.merge_outputs
 ---@return neotest.Tree?
 function M.discover_positions(file_path)
   local opts = M._opts
+
+  -- Nixpkgs files (e.g. a `pkgs/by-name` package) build their own position tree
+  -- from a static parse instead of the flake tree-sitter query.
+  local nixpkgs = require("neotest-nix.nixpkgs")
+  local nixpkgs_root = nixpkgs.resolve_root(file_path, opts)
+  if nixpkgs_root ~= nil and nixpkgs.is_nixpkgs_test_file(file_path, nixpkgs_root) then
+    return nixpkgs.discover_positions(file_path, nixpkgs_root, opts)
+  end
+
   parser.ensure_nix_parser(opts.parser_runtime_paths)
 
   local lib = require("neotest.lib")
@@ -75,6 +99,7 @@ local function validate(opts)
   vim.validate("discover_eval_checks", opts.discover_eval_checks, "boolean", true)
   vim.validate("eval_outputs", opts.eval_outputs, "table", true)
   vim.validate("nix_unit_flakes", opts.nix_unit_flakes, "table", true)
+  vim.validate("nixpkgs_mode", opts.nixpkgs_mode, "boolean", true)
 
   if opts.parser_runtime_paths ~= nil then
     for index, path in ipairs(opts.parser_runtime_paths) do

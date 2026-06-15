@@ -18,6 +18,7 @@ M.system_pattern = "^[a-z0-9_]+%-[a-z0-9_]+$"
 ---@field runner? "nix"|"nix-unit"
 ---@field nix_unit_kind? "flake"|"import"
 ---@field test_script_range? integer[]
+---@field nixpkgs_attr? string Legacy `nix-build -A` attribute for a Nixpkgs test.
 
 local nix_features = {
   "--extra-experimental-features",
@@ -332,6 +333,28 @@ function M.build_spec(args, opts)
   end
 
   local cwd = cwd_for(position.path)
+
+  -- Nixpkgs positions carry a legacy attribute and run with `nix-build -A`,
+  -- which evaluates the working tree in place (no flake copy-to-store). The
+  -- `nix` runner means results parse exactly like a flake `nix build`.
+  if position.nixpkgs_attr ~= nil then
+    local nixpkgs = require("neotest-nix.nixpkgs")
+    local run_spec = {
+      command = with_extra_args(nixpkgs.build_command(position), args.extra_args),
+      cwd = cwd,
+      strategy = process.strategy,
+      context = {
+        attr = position.nixpkgs_attr,
+        path = position.path,
+        pos_id = position.id,
+        runner = "nix",
+        type = position.type,
+      },
+    }
+    run_spec.stream = results.stream(run_spec, tree)
+    return run_spec
+  end
+
   local attr = check_attr(tree)
   local command
   local context_attr = attr

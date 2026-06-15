@@ -346,4 +346,8 @@ function M.build_position(file_path, source, captured_nodes)
   return position
 end
 
+-- Exported for the nixpkgs discovery path, which walks a `package.nix` tree to
+-- find `passthru.tests` members and needs the same full-attrpath resolution.
+M.full_attrpath_parts = full_attrpath_parts
+
 return M
