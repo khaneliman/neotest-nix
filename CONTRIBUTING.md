@@ -98,6 +98,23 @@ Tests live in `tests/`, share `tests/minimal_init.lua`, and use the fixtures in
 `tests/fixtures/`. Please add or update a spec for any behavior change — the
 suite is the contract for discovery, run-spec building, and result parsing.
 
+### Profiling discovery
+
+Discovery cost only shows up on a large tree, so there is a headless benchmark
+that drives the real hot paths (the filter_dir/is_test_file walk, static
+position parsing, and eval enumeration) against a checkout and reports the
+synchronous time of each — that time is what locks the UI, since Neotest calls
+these from a coroutine but they do their IO/parse work without yielding.
+
+```sh
+scripts/bench.sh ~/path/to/nixpkgs            # walk + static parse timings
+scripts/bench.sh ~/path/to/nixpkgs --profile  # + LuaJIT sampled hotspots
+scripts/bench.sh ~/path/to/nixpkgs --eval      # + passthru.tests eval cost
+```
+
+Use it as a measure–change–measure loop when tuning; `--profile` surfaces the
+hot functions/lines automatically.
+
 ## Documentation
 
 The Vimdoc at `doc/neotest-nix.txt` is generated from the LuaCATS annotations in
