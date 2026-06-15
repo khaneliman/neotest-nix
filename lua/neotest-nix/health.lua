@@ -153,7 +153,7 @@ function M.check()
   if vim.fn.executable("nix") == 1 then
     health.ok("`nix` on PATH")
   else
-    health.error("`nix` not found on PATH", "Install Nix with nix-command and flakes enabled")
+    health.error("`nix` not found on PATH", "Install Nix and ensure `nix` is executable")
   end
 
   if vim.fn.executable("nix-unit") == 1 then

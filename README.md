@@ -36,7 +36,9 @@ It discovers two kinds of tests in a flake-based project and runs them in place:
 ## Requirements
 
 - Neovim >= 0.11
-- [Nix](https://nixos.org/) with the `nix-command` and `flakes` features enabled
+- [Nix](https://nixos.org/) on `PATH`. The adapter passes
+  `--extra-experimental-features` for its own `nix` calls, so these features do
+  not need to be enabled globally in your Nix config.
 - [`nix-unit`](https://github.com/nix-community/nix-unit) on `PATH` (only for
   nix-unit tests)
 - Plugin dependencies: [`neotest`](https://github.com/nvim-neotest/neotest)

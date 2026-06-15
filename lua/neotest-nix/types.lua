@@ -18,7 +18,9 @@
 ---@mod neotest-nix.requirements Requirements
 ---@brief [[
 ---  - Neovim >= 0.11
----  - Nix with the `nix-command` and `flakes` features enabled
+---  - Nix on `PATH`. The adapter passes `--extra-experimental-features` for
+---    its own `nix` calls, so these features do not need to be enabled globally
+---    in your Nix config.
 ---  - `nix-unit` on PATH (only for nix-unit tests)
 ---  - Plugin dependencies: `neotest` and `nvim-nio`
 ---  - The `nix` tree-sitter grammar on your runtimepath (a `parser/nix.so`).
