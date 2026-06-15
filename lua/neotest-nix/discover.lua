@@ -202,6 +202,45 @@ local function has_nix_unit_assertion(file_path)
     )
 end
 
+---Cheap gate for a Nixpkgs `package.nix`: does it declare `passthru.tests`? The
+---tree-sitter parse in nixpkgs.discover_positions is authoritative for the
+---actual entries; this exists only to avoid turning every one of Nixpkgs' ~21k
+---testless packages into a parsed Neotest node (the difference between a usable
+---summary and a multi-second freeze on expand).
+---@param file_path string
+---@return boolean
+local function has_passthru_tests(file_path)
+  local stat = uv.fs_stat(file_path)
+  if stat == nil or stat.type ~= "file" then
+    return false
+  end
+
+  local file = io.open(file_path, "r")
+  if file == nil then
+    return false
+  end
+  local content = file:read("*a")
+  file:close()
+  if content == nil then
+    return false
+  end
+
+  -- Fast reject before the O(n) comment/string stripper: the vast majority of
+  -- packages never mention `tests` at all, so a raw substring scan (C-level)
+  -- skips the expensive Lua strip for them.
+  if content:find("tests", 1, true) == nil then
+    return false
+  end
+
+  local search = strip_nix_comments_and_strings(content)
+  if search:match("passthru%s*%.%s*tests") ~= nil then
+    return true
+  end
+  -- A `passthru = { ... }` block that binds `tests`.
+  return search:match("%f[%w]passthru%f[%W]") ~= nil
+    and search:match("%f[%w]tests%f[%W]%s*=") ~= nil
+end
+
 ---@param file_path string
 ---@param opts neotest-nix.Config?
 ---@return boolean
@@ -220,7 +259,11 @@ function M.is_test_file(file_path, opts)
   if filename == "package.nix" then
     local nixpkgs = require("neotest-nix.nixpkgs")
     local nixpkgs_root = nixpkgs.resolve_root(file_path, opts)
-    if nixpkgs_root ~= nil and nixpkgs.is_nixpkgs_test_file(file_path, nixpkgs_root) then
+    if
+      nixpkgs_root ~= nil
+      and nixpkgs.is_nixpkgs_test_file(file_path, nixpkgs_root)
+      and has_passthru_tests(file_path)
+    then
       return true
     end
   end

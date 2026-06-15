@@ -176,9 +176,17 @@ describe("discover", function()
     local pkg = vim.fs.joinpath(pkg_dir, "package.nix")
     write_file(pkg, { "{ stdenv }:", "stdenv.mkDerivation { passthru.tests.x = { }; }" })
 
-    -- A by-name package.nix is a test file even without test-named paths or a
-    -- nix-unit assertion, because the tree is Nixpkgs-shaped.
+    -- A by-name package.nix that declares passthru.tests is a test file even
+    -- without test-named paths or a nix-unit assertion.
     assert.is_true(discover.is_test_file(pkg))
+
+    -- A by-name package with no tests is not a test file: gating it out keeps
+    -- Nixpkgs' tens of thousands of testless packages out of the Neotest tree.
+    local testless_dir = vim.fs.joinpath(tmp, "pkgs", "by-name", "pl", "plain")
+    mkdir(testless_dir)
+    local testless = vim.fs.joinpath(testless_dir, "package.nix")
+    write_file(testless, { "{ stdenv }:", 'stdenv.mkDerivation { pname = "plain"; }' })
+    assert.is_false(discover.is_test_file(testless))
 
     -- The same file in a plain (non-Nixpkgs) tree is not a test file.
     local plain_dir = vim.fn.tempname()

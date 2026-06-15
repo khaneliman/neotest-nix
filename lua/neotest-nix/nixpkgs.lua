@@ -21,18 +21,32 @@ local function path_exists(path)
   return uv.fs_stat(path) ~= nil
 end
 
+-- Marker results are stable for a session and the upward walk re-checks the
+-- same ancestors for every one of Nixpkgs' tens of thousands of package files,
+-- so cache them. Without this, discovery spends most of its time re-stat-ing
+-- `pkgs`, `pkgs/by-name`, and the root over and over.
+---@type table<string, boolean>
+local marker_cache = {}
+
 ---True when `dir` is the root of a Nixpkgs-shaped tree. The combination is
 ---required to avoid claiming an ordinary flake repo that merely has a `lib/`.
 ---@param dir string
 ---@return boolean
 local function has_markers(dir)
+  local cached = marker_cache[dir]
+  if cached ~= nil then
+    return cached
+  end
+
   local function exists(rel)
     return path_exists(vim.fs.joinpath(dir, rel))
   end
 
-  return exists("pkgs/by-name")
+  local result = exists("pkgs/by-name")
     and exists("lib")
     and (exists("nixos") or exists("pkgs/top-level/all-packages.nix"))
+  marker_cache[dir] = result
+  return result
 end
 
 ---Walk upward from a file (or directory) to the nearest Nixpkgs root.
@@ -280,7 +294,18 @@ function M.discover_positions(file_path, root, opts)
     return nil
   end
 
+  local log = require("neotest-nix.log")
+  local start = log.enabled() and uv.hrtime() or nil
   local order, ranges = collect_tests(root_node, source)
+  if start ~= nil then
+    log.debug(
+      ("discover_positions %s -> %d tests %.2fms"):format(
+        file_path,
+        #order,
+        (uv.hrtime() - start) / 1e6
+      )
+    )
+  end
 
   local tests_attr = attr .. ".tests"
   local list = {
