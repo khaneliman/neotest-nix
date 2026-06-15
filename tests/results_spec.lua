@@ -184,6 +184,174 @@ describe("results", function()
     assert.are.equal("passed", parsed[position_tree:data().id].status)
   end)
 
+  it("marks a nix-eval run with an empty failure list as passed", function()
+    local root = project()
+    local position_tree = tree(root)
+    local parsed = results.results(
+      run_spec(root, { runner = "nix-eval" }),
+      { code = 0, output = output_file({ "[ ]" }) },
+      position_tree
+    )
+
+    assert.are.equal("passed", parsed[position_tree:data().id].status)
+  end)
+
+  it("ignores eval warnings before the result list", function()
+    local root = project()
+    local position_tree = tree(root)
+    local parsed = results.results(run_spec(root, { runner = "nix-eval" }), {
+      code = 0,
+      output = output_file({
+        "evaluation warning: lib.foo is deprecated",
+        "[ ]",
+      }),
+    }, position_tree)
+
+    assert.are.equal("passed", parsed[position_tree:data().id].status)
+  end)
+
+  it("marks a nix-eval run with failures as failed and names them", function()
+    local root = project()
+    local position_tree = tree(root)
+    local parsed = results.results(
+      run_spec(root, { runner = "nix-eval" }),
+      { code = 0, output = output_file({ '[{"name":"testFoo","expected":1,"result":2}]' }) },
+      position_tree
+    )
+
+    local result = parsed[position_tree:data().id]
+    assert.are.equal("failed", result.status)
+    assert.is_truthy(result.short:find("testFoo", 1, true))
+  end)
+
+  it("maps nix-eval failure lists onto child test positions", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "lib", "tests", "misc.nix")
+    local position_tree = Tree:new({
+      id = path,
+      name = "misc.nix",
+      path = path,
+      type = "file",
+    }, {
+      Tree:new({
+        id = path .. "::tests::testPass",
+        name = "testPass",
+        path = path,
+        type = "test",
+      }),
+      Tree:new({
+        id = path .. "::tests::testFail",
+        name = "testFail",
+        path = path,
+        type = "test",
+      }),
+    })
+    local parsed = results.results(
+      run_spec(root, { runner = "nix-eval" }),
+      { code = 0, output = output_file({ '[{"name":"testFail","expected":1,"result":2}]' }) },
+      position_tree
+    )
+
+    -- A passing test gets an explicit message rather than the bare `[]` output.
+    assert.are.equal("passed", parsed[path .. "::tests::testPass"].status)
+    assert.are.equal("testPass: passed", parsed[path .. "::tests::testPass"].short)
+    assert.are.equal("failed", parsed[path .. "::tests::testFail"].status)
+    -- The failure detail carries the expected/got values from lib.runTests.
+    assert.are.equal(
+      "testFail: expected 1, got 2",
+      parsed[path .. "::tests::testFail"].errors[1].message
+    )
+    assert.are.equal("failed", parsed[path].status)
+  end)
+
+  it("summarizes an all-passing nix-eval file run instead of the bare list", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "lib", "tests", "fetchers.nix")
+    local position_tree = Tree:new({
+      id = path,
+      name = "fetchers.nix",
+      path = path,
+      type = "file",
+    }, {
+      Tree:new({
+        id = path .. "::tests::testOne",
+        name = "testOne",
+        path = path,
+        type = "test",
+      }),
+      Tree:new({
+        id = path .. "::tests::testTwo",
+        name = "testTwo",
+        path = path,
+        type = "test",
+      }),
+    })
+    -- lib.runTests emits `[]` on success; the file node should say so plainly.
+    local parsed = results.results(
+      run_spec(root, { runner = "nix-eval" }),
+      { code = 0, output = output_file({ "[ ]" }) },
+      position_tree
+    )
+
+    assert.are.equal("passed", parsed[path].status)
+    assert.are.equal("all 2 tests passed", parsed[path].short)
+    assert.are.equal("testOne: passed", parsed[path .. "::tests::testOne"].short)
+  end)
+
+  it("trims the nix-eval output so the result is the last visible line", function()
+    local root = project()
+    local position_tree = tree(root)
+    local parsed = results.results(run_spec(root, { runner = "nix-eval" }), {
+      code = 0,
+      -- nix-instantiate prints warnings, the list, then a trailing newline.
+      output = output_file({
+        "evaluation warning: lib.foo is deprecated",
+        "[ ]",
+        "",
+        "",
+      }),
+    }, position_tree)
+
+    local result = parsed[position_tree:data().id]
+    assert.is_truthy(result.output)
+    local body = table.concat(vim.fn.readfile(result.output), "\n")
+    -- No trailing blank line; the box's last line carries the eval result.
+    assert.are.equal("[ ]", body:match("([^\n]*)$"))
+    assert.is_nil(body:match("\n%s*$"))
+  end)
+
+  it("keeps nix-eval failure detail for a targeted test run", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "lib", "tests", "misc.nix")
+    local position_tree = Tree:new({
+      id = path .. "::tests::testFail",
+      name = "testFail",
+      path = path,
+      type = "test",
+    })
+    local parsed = results.results(
+      run_spec(root, { runner = "nix-eval", pos_id = path .. "::tests::testFail", type = "test" }),
+      { code = 0, output = output_file({ '[{"name":"testFail","expected":1,"result":2}]' }) },
+      position_tree
+    )
+
+    local result = parsed[path .. "::tests::testFail"]
+    assert.are.equal("failed", result.status)
+    assert.are.equal("testFail: expected 1, got 2", result.errors[1].message)
+  end)
+
+  it("marks a nix-eval run that errored as failed", function()
+    local root = project()
+    local position_tree = tree(root)
+    local parsed = results.results(
+      run_spec(root, { runner = "nix-eval" }),
+      { code = 1, output = output_file({ "error: attribute 'tests' missing" }) },
+      position_tree
+    )
+
+    assert.are.equal("failed", parsed[position_tree:data().id].status)
+  end)
+
   it("parses nix errors with translated local diagnostics", function()
     local root = project()
     local position_tree = tree(root)

@@ -1,3 +1,4 @@
+---@diagnostic disable: need-check-nil, missing-fields
 local nixpkgs = require("neotest-nix.nixpkgs")
 
 local function mkdir(path)
@@ -35,6 +36,17 @@ local function test_attrs(tree)
     end
   end
   return attrs
+end
+
+---Map eval test-position name -> full position from a discovered tree.
+local function eval_tests(tree)
+  local tests = {}
+  for _, position in tree:iter() do
+    if position.type == "test" then
+      tests[position.name] = position
+    end
+  end
+  return tests
 end
 
 describe("nixpkgs", function()
@@ -119,15 +131,19 @@ describe("nixpkgs", function()
   end)
 
   describe("should_descend", function()
-    it("keeps only the supported subtrees", function()
+    it("keeps the supported subtrees and their ancestors", function()
       assert.is_true(nixpkgs.should_descend(""))
       assert.is_true(nixpkgs.should_descend("pkgs"))
       assert.is_true(nixpkgs.should_descend("pkgs/by-name"))
       assert.is_true(nixpkgs.should_descend("pkgs/by-name/he/hello"))
+      -- lib/nixos are descended only as far as their tests subtrees.
+      assert.is_true(nixpkgs.should_descend("lib"))
+      assert.is_true(nixpkgs.should_descend("lib/tests"))
+      assert.is_true(nixpkgs.should_descend("nixos/tests"))
 
       assert.is_false(nixpkgs.should_descend("pkgs/development"))
-      assert.is_false(nixpkgs.should_descend("lib"))
-      assert.is_false(nixpkgs.should_descend("nixos"))
+      assert.is_false(nixpkgs.should_descend("lib/sources"))
+      assert.is_false(nixpkgs.should_descend("nixos/modules"))
     end)
   end)
 
@@ -181,6 +197,55 @@ describe("nixpkgs", function()
         "dotted.tests.beta",
         test_attrs(nixpkgs.discover_positions(dotted, root, {})).beta
       )
+    end)
+
+    it("handles inherited and selected passthru test members", function()
+      local root = nixpkgs_tree()
+      local inherited = write_package(root, "inherited", {
+        "{ nixosTests, smoke }:",
+        "stdenv.mkDerivation {",
+        "  passthru.tests = {",
+        "    inherit smoke;",
+        "    inherit (nixosTests) podman;",
+        "  };",
+        "}",
+      })
+      local selected = write_package(root, "selected", {
+        "{ nixosTests }:",
+        "stdenv.mkDerivation {",
+        "  passthru = {",
+        "    tests = nixosTests.alice-lg;",
+        "  };",
+        "}",
+      })
+
+      local inherited_attrs = test_attrs(nixpkgs.discover_positions(inherited, root, {}))
+      assert.are.equal("inherited.tests.smoke", inherited_attrs.smoke)
+      assert.are.equal("inherited.tests.podman", inherited_attrs.podman)
+      assert.are.equal(
+        "selected.tests.alice-lg",
+        test_attrs(nixpkgs.discover_positions(selected, root, {}))["alice-lg"]
+      )
+    end)
+
+    it("ignores nested attrs inside computed passthru tests", function()
+      local root = nixpkgs_tree()
+      local pkg = write_package(root, "computed", {
+        "{ lib, finalPackage }:",
+        "stdenv.mkDerivation {",
+        "  passthru.tests =",
+        "    (lib.listToAttrs (map (name: lib.nameValuePair name (",
+        "      finalPackage.overrideAttrs (previousAttrs: {",
+        "        passthru = previousAttrs.passthru // { flag = true; };",
+        "      })",
+        '    )) [ "generated" ]))',
+        "    // { static = { }; };",
+        "}",
+      })
+
+      local attrs = test_attrs(nixpkgs.discover_positions(pkg, root, {}))
+      assert.are.equal("computed.tests.static", attrs.static)
+      assert.is_nil(attrs.passthru)
     end)
 
     it("falls back to eval when static parse finds no tests", function()
@@ -271,12 +336,164 @@ describe("nixpkgs", function()
     end)
   end)
 
+  describe("test_file_kind", function()
+    it("classifies by-name, lib, and nixos test files", function()
+      local root = "/nixpkgs"
+      local function kind(rel)
+        return nixpkgs.test_file_kind("/nixpkgs/" .. rel, root)
+      end
+
+      assert.are.equal("by-name", kind("pkgs/by-name/he/hello/package.nix"))
+      assert.are.equal("lib", kind("lib/tests/release.nix"))
+      assert.are.equal("lib", kind("lib/tests/misc.nix"))
+      assert.are.equal("lib", kind("lib/tests/fetchers.nix"))
+      assert.are.equal("lib", kind("lib/tests/systems.nix"))
+      assert.are.equal("lib", kind("lib/tests/maintainers.nix"))
+      assert.are.equal("lib", kind("lib/tests/nix-unit.nix"))
+      assert.are.equal("lib", kind("lib/tests/teams.nix"))
+      assert.are.equal("nixos", kind("nixos/tests/login.nix"))
+
+      -- not tests
+      assert.is_nil(kind("lib/tests/modules.nix"))
+      assert.is_nil(kind("lib/tests/maintainer-module.nix"))
+      assert.is_nil(kind("lib/tests/nix-for-tests.nix"))
+      assert.is_nil(kind("lib/tests/test-with-nix.nix"))
+      assert.is_nil(kind("nixos/tests/make-test-python.nix"))
+      assert.is_nil(kind("nixos/tests/default.nix"))
+      assert.is_nil(kind("nixos/tests/common/acme.nix"))
+      assert.is_nil(kind("pkgs/development/libraries/qt-6/default.nix"))
+    end)
+  end)
+
+  describe("lib discovery", function()
+    it("builds build-style files and evaluates eval-style files", function()
+      local root = nixpkgs_tree()
+      vim.fn.mkdir(vim.fs.joinpath(root, "lib", "tests"), "p")
+      local release = vim.fs.joinpath(root, "lib", "tests", "release.nix")
+      local maintainers = vim.fs.joinpath(root, "lib", "tests", "maintainers.nix")
+      local misc = vim.fs.joinpath(root, "lib", "tests", "misc.nix")
+      local systems = vim.fs.joinpath(root, "lib", "tests", "systems.nix")
+      write_file(release, { "{ }" })
+      write_file(maintainers, { '{ pkgs ? import ../.. { } }: pkgs.runCommand "x" { } "" ' })
+      write_file(misc, { "[ ]" })
+      write_file(systems, { "[ ]" })
+
+      local rtree = nixpkgs.discover_positions(release, root, {})
+      assert.are.equal("lib/tests/release.nix", rtree:data().nixpkgs_file_build)
+      assert.are.equal("nix", rtree:data().runner)
+
+      local maintree = nixpkgs.discover_positions(maintainers, root, {})
+      assert.are.equal("lib/tests/maintainers.nix", maintree:data().nixpkgs_file_build)
+      assert.are.equal("nix", maintree:data().runner)
+
+      local mtree = nixpkgs.discover_positions(misc, root, {})
+      assert.are.equal("lib/tests/misc.nix", mtree:data().nixpkgs_file_eval)
+      assert.are.equal("nix-eval", mtree:data().runner)
+
+      local stree = nixpkgs.discover_positions(systems, root, {})
+      assert.are.equal("lib/tests/systems.nix", stree:data().nixpkgs_file_eval)
+      assert.are.equal("nix-eval", stree:data().runner)
+    end)
+
+    it("enumerates static lib.runTests members under eval-style files", function()
+      local root = nixpkgs_tree()
+      local misc = vim.fs.joinpath(root, "lib", "tests", "misc.nix")
+      local systems = vim.fs.joinpath(root, "lib", "tests", "systems.nix")
+      write_file(misc, {
+        "let",
+        "  lib.runTests = tests: [ ];",
+        "in",
+        "lib.runTests {",
+        "  testAlpha = { expr = 1; expected = 1; };",
+        "  helper = { expr = 2; expected = 2; };",
+        "  testBeta.expr = 3;",
+        "  testBeta.expected = 3;",
+        "}",
+      })
+      write_file(systems, {
+        "let runTests = tests: [ ]; in",
+        "runTests (({",
+        "  testSystem = { expr = true; expected = true; };",
+        "}) // {",
+        "  testOther = { expr = false; expected = false; };",
+        "})",
+      })
+
+      local misc_tests = eval_tests(nixpkgs.discover_positions(misc, root, {}))
+      assert.are.equal("testAlpha", misc_tests.testAlpha.nixpkgs_eval_test)
+      assert.are.equal("testBeta", misc_tests.testBeta.nixpkgs_eval_test)
+      assert.is_nil(misc_tests.helper)
+      assert.are.equal("lib/tests/misc.nix", misc_tests.testAlpha.nixpkgs_file_eval)
+      assert.are.equal("nix-eval", misc_tests.testAlpha.runner)
+
+      local system_tests = eval_tests(nixpkgs.discover_positions(systems, root, {}))
+      assert.are.equal("testSystem", system_tests.testSystem.nixpkgs_eval_test)
+      assert.are.equal("testOther", system_tests.testOther.nixpkgs_eval_test)
+    end)
+  end)
+
+  describe("nixos discovery", function()
+    it("targets nixosTests.<name>", function()
+      local root = nixpkgs_tree()
+      vim.fn.mkdir(vim.fs.joinpath(root, "nixos", "tests"), "p")
+      local test = vim.fs.joinpath(root, "nixos", "tests", "login.nix")
+      write_file(test, {
+        "{",
+        '  name = "login";',
+        "  testScript = ''",
+        "    machine.wait_for_unit()",
+        "  '';",
+        "}",
+      })
+
+      local tree = nixpkgs.discover_positions(test, root, {})
+      assert.are.equal("nixosTests.login", tree:data().nixpkgs_attr)
+      assert.are.equal("nix", tree:data().runner)
+      -- testScript range captured for traceback attribution
+      assert.is_not_nil(tree:data().test_script_range)
+    end)
+  end)
+
   describe("build_command", function()
-    it("builds a legacy nix-build for the attribute", function()
+    it("builds nix-build -A for an attribute", function()
+      local command, runner = nixpkgs.build_command({ nixpkgs_attr = "hello.tests.simple" })
+      assert.same({ "nix-build", "-A", "hello.tests.simple", "--no-out-link" }, command)
+      assert.are.equal("nix", runner)
+    end)
+
+    it("builds nix-build <file> for a buildable file", function()
+      local command, runner =
+        nixpkgs.build_command({ nixpkgs_file_build = "lib/tests/release.nix" })
+      assert.same({ "nix-build", "lib/tests/release.nix", "--no-out-link" }, command)
+      assert.are.equal("nix", runner)
+    end)
+
+    it("builds nix-instantiate --eval for an eval file", function()
+      local command, runner = nixpkgs.build_command({ nixpkgs_file_eval = "lib/tests/misc.nix" })
       assert.same(
-        { "nix-build", "-A", "hello.tests.simple", "--no-out-link" },
-        nixpkgs.build_command({ nixpkgs_attr = "hello.tests.simple" })
+        { "nix-instantiate", "--eval", "--strict", "--json", "lib/tests/misc.nix" },
+        command
       )
+      assert.are.equal("nix-eval", runner)
+    end)
+
+    it("builds a filtered eval expression for an eval test", function()
+      local command, runner = nixpkgs.build_command({
+        nixpkgs_file_eval = "lib/tests/misc.nix",
+        nixpkgs_eval_test = "testAlpha",
+      })
+
+      assert.are.equal("nix-eval", runner)
+      assert.same({ "nix-instantiate", "--eval", "--strict", "--json", "--expr" }, {
+        command[1],
+        command[2],
+        command[3],
+        command[4],
+        command[5],
+      })
+      assert.is_truthy(command[6]:find("import ./lib/tests/misc.nix", 1, true))
+      assert.is_truthy(command[6]:find("builtins.filter", 1, true))
+      assert.is_truthy(command[6]:find("testAlpha", 1, true))
     end)
   end)
 end)

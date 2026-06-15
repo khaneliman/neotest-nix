@@ -456,6 +456,93 @@ describe("spec", function()
     assert.is_function(run.stream)
   end)
 
+  it("builds nix-build for a lib release file position", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "lib", "tests", "release.nix")
+    local run = build_spec({
+      tree = node({
+        id = path,
+        name = "release.nix",
+        path = path,
+        type = "file",
+        runner = "nix",
+        nixpkgs_file_build = "lib/tests/release.nix",
+      }),
+    })
+
+    assert.same({ "nix-build", "lib/tests/release.nix", "--no-out-link" }, run.command)
+    assert.are.equal("nix", run.context.runner)
+    assert.is_function(run.stream)
+  end)
+
+  it("builds nix-instantiate for a lib misc eval position", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "lib", "tests", "misc.nix")
+    local run = build_spec({
+      tree = node({
+        id = path,
+        name = "misc.nix",
+        path = path,
+        type = "file",
+        runner = "nix-eval",
+        nixpkgs_file_eval = "lib/tests/misc.nix",
+      }),
+    })
+
+    assert.same(
+      { "nix-instantiate", "--eval", "--strict", "--json", "lib/tests/misc.nix" },
+      run.command
+    )
+    assert.are.equal("nix-eval", run.context.runner)
+    -- eval output is parsed in full at the end, so no incremental stream.
+    assert.is_nil(run.stream)
+  end)
+
+  it("builds filtered nix-instantiate for a lib eval test position", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "lib", "tests", "misc.nix")
+    local run = build_spec({
+      tree = node({
+        id = path .. "::tests::testAlpha",
+        name = "testAlpha",
+        path = path,
+        type = "test",
+        runner = "nix-eval",
+        nixpkgs_file_eval = "lib/tests/misc.nix",
+        nixpkgs_eval_test = "testAlpha",
+      }),
+    })
+
+    assert.are.equal("nix-instantiate", run.command[1])
+    assert.are.equal("--expr", run.command[5])
+    assert.is_truthy(run.command[6]:find("import ./lib/tests/misc.nix", 1, true))
+    assert.is_truthy(run.command[6]:find("builtins.filter", 1, true))
+    assert.is_truthy(run.command[6]:find("testAlpha", 1, true))
+    assert.are.equal("lib/tests/misc.nix", run.context.attr)
+    assert.are.equal("nix-eval", run.context.runner)
+    assert.are.equal(path .. "::tests::testAlpha", run.context.pos_id)
+    assert.is_nil(run.stream)
+  end)
+
+  it("builds nix-build -A nixosTests for a nixos test position", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "nixos", "tests", "login.nix")
+    local run = build_spec({
+      tree = node({
+        id = path,
+        name = "login.nix",
+        path = path,
+        type = "file",
+        runner = "nix",
+        nixpkgs_attr = "nixosTests.login",
+      }),
+    })
+
+    assert.same({ "nix-build", "-A", "nixosTests.login", "--no-out-link" }, run.command)
+    assert.are.equal("nixosTests.login", run.context.attr)
+    assert.are.equal("nix", run.context.runner)
+  end)
+
   it("does not build specs for directory positions", function()
     ---@type any
     local run_args = {

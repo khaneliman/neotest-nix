@@ -204,12 +204,34 @@ describe("discover", function()
     assert.is_true(discover.filter_dir("pkgs", "pkgs", tmp))
     assert.is_true(discover.filter_dir("by-name", "pkgs/by-name", tmp))
     assert.is_false(discover.filter_dir("development", "pkgs/development", tmp))
-    assert.is_false(discover.filter_dir("lib", "lib", tmp))
+    -- lib and nixos are descended only as far as their tests subtrees.
+    assert.is_true(discover.filter_dir("lib", "lib", tmp))
+    assert.is_true(discover.filter_dir("tests", "lib/tests", tmp))
+    assert.is_true(discover.filter_dir("tests", "nixos/tests", tmp))
+    assert.is_false(discover.filter_dir("modules", "nixos/modules", tmp))
 
     -- nixpkgs_mode = false keeps the default behaviour (no pruning).
     assert.is_true(
       discover.filter_dir("development", "pkgs/development", tmp, { nixpkgs_mode = false })
     )
+  end)
+
+  it("recognizes lib and nixos test files in a Nixpkgs checkout", function()
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "lib", "tests"), "p")
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "nixos", "tests"), "p")
+    mkdir(vim.fs.joinpath(tmp, "pkgs", "by-name"))
+
+    local release = vim.fs.joinpath(tmp, "lib", "tests", "release.nix")
+    local nixos = vim.fs.joinpath(tmp, "nixos", "tests", "login.nix")
+    local helper = vim.fs.joinpath(tmp, "nixos", "tests", "make-test-python.nix")
+    write_file(release, { "{ }" })
+    write_file(nixos, { '{ testScript = ""; }' })
+    write_file(helper, { "{ }" })
+
+    assert.is_true(discover.is_test_file(release))
+    assert.is_true(discover.is_test_file(nixos))
+    -- infrastructure files are not tests
+    assert.is_false(discover.is_test_file(helper))
   end)
 
   it("recognizes lib and nixos test files in a Nixpkgs checkout", function()
