@@ -350,4 +350,8 @@ end
 -- find `passthru.tests` members and needs the same full-attrpath resolution.
 M.full_attrpath_parts = full_attrpath_parts
 
+-- Exported so nixpkgs NixOS VM tests can anchor Python tracebacks to a literal
+-- `testScript` in the file (search from the root node).
+M.test_script_range = test_script_range
+
 return M

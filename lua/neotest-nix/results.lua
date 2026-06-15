@@ -487,6 +487,173 @@ local function nix_unit_results(tree, output, code, root, spec)
   return results
 end
 
+---Render a `lib.runTests` value (expected/result) compactly for a failure
+---message. Strings pass through; everything else is JSON-encoded so attrsets and
+---lists stay readable. Long values are truncated so the summary line stays short.
+---@param value any
+---@return string
+local function format_eval_value(value)
+  local text
+  if type(value) == "string" then
+    text = value
+  else
+    local ok, encoded = pcall(vim.json.encode, value)
+    text = (ok and encoded ~= nil) and encoded or tostring(value)
+  end
+  if #text > 200 then
+    text = text:sub(1, 197) .. "..."
+  end
+  return text
+end
+
+---Human-readable detail for one `lib.runTests` failure entry, e.g.
+---`expected 1, got 2`. Returns nil when the entry carries no expected/result
+---(then the caller falls back to a bare "failed").
+---@param failure any
+---@return string?
+local function eval_failure_detail(failure)
+  if type(failure) ~= "table" then
+    return nil
+  end
+  if failure.expected == nil and failure.result == nil then
+    return nil
+  end
+  return ("expected %s, got %s"):format(
+    format_eval_value(failure.expected),
+    format_eval_value(failure.result)
+  )
+end
+
+-- Monotonic suffix so concurrent eval runs never collide on an output path.
+local output_seq = 0
+
+---Write `text` to a temp file and return its path, or nil on failure. Used to
+---give nix-eval results their own trimmed output: `nix-instantiate` ends its
+---output with a trailing newline, so the captured file's last line is blank and
+---the result (`[]` on success) is pushed out of view in Neotest's output box.
+---
+---Neotest invokes `results` from a libuv (fast event) context, where `vim.fn.*`
+---is forbidden, so the path is built from `vim.uv` primitives and written with
+---plain Lua IO rather than `vim.fn.tempname`.
+---@param text string
+---@return string?
+local function write_output(text)
+  output_seq = output_seq + 1
+  local dir = uv.os_tmpdir() or "/tmp"
+  local path = ("%s/neotest-nix-%d-%d-%d.out"):format(dir, uv.os_getpid(), uv.hrtime(), output_seq)
+  local file = io.open(path, "w")
+  if file == nil then
+    return nil
+  end
+  file:write(text)
+  file:close()
+  return path
+end
+
+---Build results for a legacy eval run (lib/tests/misc.nix), whose output is a
+---`lib.runTests` failure list: `[]` means every test passed, otherwise each
+---entry names a failing test. The JSON is extracted from the merged
+---stdout/stderr with a balanced-bracket match.
+---
+---`lib.runTests` only ever reports failures, so a passing test produces no
+---output of its own. Rather than surface the bare `[]` (which reads as "nothing
+---ran"), each position is given an explicit pass/fail `short` message, and
+---failures carry an `expected/got` detail anchored to the test's line.
+---@param tree neotest.Tree
+---@param output string
+---@param code integer
+---@return table<string, neotest.Result>
+local function nix_eval_results(tree, output, code)
+  local id = tree:data().id
+  local clean = strip_ansi(output)
+
+  -- The result JSON is printed last, but `evaluation warning:` lines (from
+  -- stderr, merged into this output) can precede it. Scan lines from the end
+  -- for the first that decodes to a list.
+  local value
+  local lines = vim.split(clean, "\n", { plain = true })
+  for index = #lines, 1, -1 do
+    local line = vim.trim(lines[index])
+    if line ~= "" then
+      local ok, decoded = pcall(vim.json.decode, line)
+      if ok and type(decoded) == "table" then
+        value = decoded
+        break
+      end
+    end
+  end
+
+  -- A trimmed copy of the eval output, so the box's last line is the result
+  -- (`[]` or the failure list) rather than the trailing blank Nix prints.
+  local out = write_output(vim.trim(clean))
+  local function attach(results)
+    if out ~= nil then
+      for _, result in pairs(results) do
+        result.output = out
+      end
+    end
+    return results
+  end
+
+  if code == 0 and value ~= nil then
+    local failures = {}
+    local names = {}
+    for _, failure in ipairs(value) do
+      local name = (type(failure) == "table" and failure.name) or tostring(failure)
+      failures[name] = failure
+      names[#names + 1] = name
+    end
+
+    local positions = test_positions(tree)
+    if #positions > 0 then
+      local results = {}
+      for _, position in ipairs(positions) do
+        local failure = failures[position.name]
+        if failure == nil then
+          results[position.id] = {
+            status = "passed",
+            short = ("%s: passed"):format(position.name),
+          }
+        else
+          local detail = eval_failure_detail(failure)
+          local message = detail and ("%s: %s"):format(position.name, detail)
+            or ("%s: failed"):format(position.name)
+          local err = { message = message }
+          if type(position.range) == "table" and position.range[1] ~= nil then
+            err.line = position.range[1]
+          end
+          results[position.id] = { status = "failed", short = message, errors = { err } }
+        end
+      end
+      -- Summarize the file/namespace node when it is not itself a test position.
+      if results[id] == nil then
+        if #value > 0 then
+          local message = ("%d failing: %s"):format(#names, table.concat(names, ", "))
+          results[id] = { status = "failed", short = message, errors = { { message = message } } }
+        else
+          results[id] = {
+            status = "passed",
+            short = ("all %d tests passed"):format(#positions),
+          }
+        end
+      end
+      return attach(results)
+    end
+
+    -- No per-test positions (static parse found nothing): report at file level.
+    if #value == 0 then
+      return attach({ [id] = { status = "passed", short = "all tests passed" } })
+    end
+
+    local message = ("%d failing: %s"):format(#names, table.concat(names, ", "))
+    return attach({
+      [id] = { status = "failed", short = message, errors = { { message = message } } },
+    })
+  end
+
+  return attach({ [id] = { status = "failed", short = failure_message(clean), errors = {} } })
+end
+
 ---@param spec neotest.RunSpec
 ---@param result neotest.StrategyResult
 ---@param tree neotest.Tree
@@ -498,6 +665,10 @@ function M.results(spec, result, tree)
 
   if spec.context ~= nil and spec.context.runner == "nix-unit" then
     return nix_unit_results(tree, output, result.code, root, spec)
+  end
+
+  if spec.context ~= nil and spec.context.runner == "nix-eval" then
+    return nix_eval_results(tree, output, result.code)
   end
 
   if result.code == 0 then

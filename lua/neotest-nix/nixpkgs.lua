@@ -184,13 +184,81 @@ function M.attr_for_by_name(file_path, root)
   return name
 end
 
+-- nixos/tests/*.nix entries that are infrastructure, not runnable VM tests.
+local nixos_non_tests = {
+  ["default"] = true,
+  ["all-tests"] = true,
+  ["make-test-python"] = true,
+  ["make-test"] = true,
+  ["common"] = true,
+}
+
+-- Top-level runnable lib tests. Helper inputs under lib/tests (for example
+-- maintainer-module.nix and test-with-nix.nix) are intentionally skipped because
+-- they require arguments or are exercised by release.nix/nix-unit.nix.
+local lib_eval_tests = {
+  ["fetchers.nix"] = true,
+  ["misc.nix"] = true,
+  ["systems.nix"] = true,
+}
+
+local lib_build_tests = {
+  ["maintainers.nix"] = true,
+  ["nix-unit.nix"] = true,
+  ["release.nix"] = true,
+  ["teams.nix"] = true,
+}
+
+---@param rel string
+---@return "build"|"eval"|nil
+local function lib_test_runner(rel)
+  local name = rel:match("^lib/tests/([^/]+%.nix)$")
+  if name == nil then
+    return nil
+  end
+  if lib_eval_tests[name] then
+    return "eval"
+  end
+  if lib_build_tests[name] then
+    return "build"
+  end
+  return nil
+end
+
+---Classify a file under a Nixpkgs root by how it is run, or nil when it is not a
+---recognized test file. Pure path matching, cheap enough for the discovery walk.
+---@param file_path string
+---@param root string
+---@return "by-name"|"lib"|"nixos"|nil
+function M.test_file_kind(file_path, root)
+  local rel = relpath(file_path, root)
+  if rel == nil then
+    return nil
+  end
+
+  if rel:match("^pkgs/by%-name/[^/]+/[^/]+/package%.nix$") ~= nil then
+    return "by-name"
+  end
+
+  if lib_test_runner(rel) ~= nil then
+    return "lib"
+  end
+
+  local nixos = rel:match("^nixos/tests/([^/]+)%.nix$")
+  if nixos ~= nil and not nixos_non_tests[nixos] then
+    return "nixos"
+  end
+
+  return nil
+end
+
 ---Whether a file under a Nixpkgs root is a recognized test file. Kept cheap (no
 ---evaluation) so it is safe to call during Neotest's discovery walk.
 ---@param file_path string
 ---@param root string
 ---@return boolean
 function M.is_nixpkgs_test_file(file_path, root)
-  return M.attr_for_by_name(file_path, root) ~= nil
+  return M.test_file_kind(file_path, root) ~= nil
 end
 
 ---@param a string
@@ -205,6 +273,8 @@ end
 -- the recursive scan stays usable. Later phases add lib/tests and nixos/tests.
 local allowed_prefixes = {
   "pkgs/by-name",
+  "lib/tests",
+  "nixos/tests",
 }
 
 ---Whether the discovery walk should descend into a directory (given relative to
@@ -240,11 +310,26 @@ local function read_file(file_path)
   return content
 end
 
+---@param binding TSNode
+---@return TSNode?
+local function binding_expression(binding)
+  local expressions = binding:field("expression")
+  return expressions and expressions[1] or nil
+end
+
+---@param node TSNode
+---@return boolean
+local function is_attrset_node(node)
+  local node_type = node:type()
+  return node_type == "attrset_expression" or node_type == "rec_attrset_expression"
+end
+
 ---Collect the names of a package's tests by static parse. Any binding whose
 ---full attribute path runs through `tests` or `passthru.tests` contributes the
 ---segment immediately after `tests`, covering the attrset (`passthru.tests = {
----a = ...; }` and `passthru = { tests = { a = ...; }; }`) and dotted
----(`passthru.tests.a = ...;`) spellings alike. Computed or `inherit`-ed members
+---a = ...; }` and `passthru = { tests = { a = ...; }; }`), dotted
+---(`passthru.tests.a = ...;`), direct inherit (`inherit (nixosTests) a;`), and
+---selected attr (`tests = nixosTests.a;`) spellings alike. More dynamic members
 ---are invisible to a static parse; eval-based enumeration is a later phase.
 ---@param root_node TSNode
 ---@param source string
@@ -258,8 +343,105 @@ local function collect_tests(root_node, source)
   -- per-member source location.
   local tests_range
 
+  ---@param name string?
+  ---@param node TSNode?
+  local function add(name, node)
+    if name ~= nil and name ~= "tests" and ranges[name] == nil then
+      ranges[name] = node ~= nil and { node:range() } or { 0, 0, 0, 0 }
+      order[#order + 1] = name
+    end
+  end
+
+  ---@param node TSNode
+  ---@return string?, TSNode?
+  local function select_leaf(node)
+    if node:type() ~= "select_expression" then
+      return nil, nil
+    end
+
+    ---@type TSNode?
+    local last
+    local function walk(current)
+      if current:type() == "identifier" then
+        last = current
+      end
+      for child in current:iter_children() do
+        walk(child)
+      end
+    end
+
+    walk(node)
+    return last ~= nil and vim.treesitter.get_node_text(last, source) or nil, last
+  end
+
+  ---@param attrset TSNode
+  local function add_direct_inherits(attrset)
+    if not is_attrset_node(attrset) then
+      return
+    end
+
+    for child in attrset:iter_children() do
+      if child:type() == "binding_set" then
+        for member in child:iter_children() do
+          local kind = member:type()
+          if kind == "inherit" or kind == "inherit_from" then
+            for inherit_child in member:iter_children() do
+              if inherit_child:type() == "inherited_attrs" then
+                for identifier in inherit_child:iter_children() do
+                  if identifier:type() == "identifier" then
+                    add(vim.treesitter.get_node_text(identifier, source), identifier)
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  ---@param binding TSNode
+  ---@return boolean
+  local function has_tests_attrpath(binding)
+    local attrpath = binding:field("attrpath")
+    attrpath = attrpath and attrpath[1] or nil
+    if attrpath == nil then
+      return false
+    end
+
+    for child in attrpath:iter_children() do
+      if
+        child:type() == "identifier" and vim.treesitter.get_node_text(child, source) == "tests"
+      then
+        return true
+      end
+    end
+    return false
+  end
+
+  ---@param binding TSNode
+  ---@return boolean
+  local function crosses_function_before_tests(binding)
+    ---@type TSNode?
+    local current = binding
+    while current ~= nil do
+      if current:type() == "binding" and has_tests_attrpath(current) then
+        return false
+      end
+      if current ~= binding and current:type() == "function_expression" then
+        return true
+      end
+      current = current:parent()
+    end
+    return false
+  end
+
   ---@param binding TSNode
   local function consider(binding)
+    if crosses_function_before_tests(binding) then
+      return
+    end
+
     local parts = positions.full_attrpath_parts(binding, source)
     for index, segment in ipairs(parts) do
       if segment == "tests" then
@@ -267,12 +449,18 @@ local function collect_tests(root_node, source)
         if prefix_ok then
           local name = parts[index + 1]
           if name ~= nil then
-            if ranges[name] == nil then
-              ranges[name] = { binding:range() }
-              order[#order + 1] = name
+            add(name, binding)
+          else
+            if tests_range == nil then
+              tests_range = { binding:range() }
             end
-          elseif tests_range == nil then
-            tests_range = { binding:range() }
+
+            local expression = binding_expression(binding)
+            if expression ~= nil then
+              add_direct_inherits(expression)
+              local leaf, node = select_leaf(expression)
+              add(leaf, node)
+            end
           end
         end
         break
@@ -292,6 +480,141 @@ local function collect_tests(root_node, source)
 
   walk(root_node)
   return order, ranges, tests_range
+end
+
+---@param binding TSNode
+---@param source string
+---@return string?, TSNode?
+local function binding_name(binding, source)
+  local attrpath = binding:field("attrpath")
+  attrpath = attrpath and attrpath[1] or nil
+  if attrpath == nil then
+    return nil, nil
+  end
+
+  for child in attrpath:iter_children() do
+    local kind = child:type()
+    if kind == "identifier" then
+      return vim.treesitter.get_node_text(child, source), child
+    elseif kind == "string_expression" then
+      local text = vim.treesitter.get_node_text(child, source)
+      if text:find("${", 1, true) == nil then
+        local ok, decoded = pcall(vim.json.decode, text)
+        if ok and type(decoded) == "string" then
+          return decoded, child
+        end
+      end
+    end
+  end
+
+  return nil, nil
+end
+
+---@param node TSNode
+---@return TSNode[]
+local function node_children(node)
+  local children = {}
+  for child in node:iter_children() do
+    children[#children + 1] = child
+  end
+  return children
+end
+
+---@param node TSNode
+---@param source string
+---@return TSNode?
+local function run_tests_argument(node, source)
+  if node:type() ~= "apply_expression" then
+    return nil
+  end
+
+  local children = node_children(node)
+  local callee = children[1]
+  local argument = children[2]
+  if callee == nil or argument == nil then
+    return nil
+  end
+
+  local text = vim.treesitter.get_node_text(callee, source)
+  if text == "runTests" or text:match("%.runTests$") ~= nil then
+    return argument
+  end
+
+  return nil
+end
+
+---@param attrset TSNode
+---@param source string
+---@param add fun(name: string, node: TSNode)
+local function collect_run_tests_attrset(attrset, source, add)
+  if not is_attrset_node(attrset) then
+    return
+  end
+
+  for child in attrset:iter_children() do
+    if child:type() == "binding_set" then
+      for binding in child:iter_children() do
+        if binding:type() == "binding" then
+          local name, node = binding_name(binding, source)
+          if name ~= nil and name:sub(1, 4) == "test" then
+            add(name, node or binding)
+          end
+        end
+      end
+    end
+  end
+end
+
+---Collect statically named members passed to `lib.runTests`. This intentionally
+---looks only inside the runTests argument so helper functions such as
+---`genTests = n: ...` do not appear as runnable cases.
+---@param root_node TSNode
+---@param source string
+---@return string[] names, table<string, integer[]> ranges
+local function collect_run_tests(root_node, source)
+  local order = {}
+  local ranges = {}
+
+  ---@param name string
+  ---@param node TSNode
+  local function add(name, node)
+    if ranges[name] == nil then
+      ranges[name] = { node:range() }
+      order[#order + 1] = name
+    end
+  end
+
+  ---@param node TSNode
+  local function collect_arg(node)
+    local kind = node:type()
+    if kind == "function_expression" then
+      return
+    end
+    if is_attrset_node(node) then
+      collect_run_tests_attrset(node, source, add)
+      return
+    end
+
+    for child in node:iter_children() do
+      collect_arg(child)
+    end
+  end
+
+  ---@param node TSNode
+  local function walk(node)
+    local argument = run_tests_argument(node, source)
+    if argument ~= nil then
+      collect_arg(argument)
+      return
+    end
+
+    for child in node:iter_children() do
+      walk(child)
+    end
+  end
+
+  walk(root_node)
+  return order, ranges
 end
 
 -- Eval-discovered test names cached per file and invalidated by mtime, so
@@ -331,20 +654,11 @@ local function eval_test_names(file_path, root, attr)
   return names
 end
 
----Build a position tree for a `pkgs/by-name` package file. The file node and a
----`tests` namespace both target `<pkg>.tests` (build the whole suite); each
----member targets `<pkg>.tests.<name>`. Returns nil when the file is not a
----by-name package or cannot be parsed.
+---Parse a Nix file into its tree-sitter root node and source text.
 ---@param file_path string
----@param root string
 ---@param opts neotest-nix.Config?
----@return neotest.Tree?
-function M.discover_positions(file_path, root, opts)
-  local attr = M.attr_for_by_name(file_path, root)
-  if attr == nil then
-    return nil
-  end
-
+---@return TSNode? root_node, string? source
+local function parse_file(file_path, opts)
   require("neotest-nix.parser").ensure_nix_parser(opts and opts.parser_runtime_paths)
 
   local source = read_file(file_path)
@@ -361,6 +675,37 @@ function M.discover_positions(file_path, root, opts)
       ("neotest-nix: failed to parse %s: %s"):format(file_path, root_node),
       vim.log.levels.WARN
     )
+    return nil
+  end
+
+  return root_node, source
+end
+
+---@param data table
+---@return neotest.Tree
+local function tree_from(data)
+  local Tree = require("neotest.types").Tree
+  return Tree.from_list(data, function(node)
+    return node.id
+  end)
+end
+
+---Build a position tree for a `pkgs/by-name` package file. The file node and a
+---`tests` namespace both target `<pkg>.tests` (build the whole suite); each
+---member targets `<pkg>.tests.<name>`. Returns nil when the file is not a
+---by-name package or cannot be parsed.
+---@param file_path string
+---@param root string
+---@param opts neotest-nix.Config?
+---@return neotest.Tree?
+local function by_name_positions(file_path, root, opts)
+  local attr = M.attr_for_by_name(file_path, root)
+  if attr == nil then
+    return nil
+  end
+
+  local root_node, source = parse_file(file_path, opts)
+  if root_node == nil or source == nil then
     return nil
   end
 
@@ -431,18 +776,154 @@ function M.discover_positions(file_path, root, opts)
     table.insert(list, namespace)
   end
 
-  local Tree = require("neotest.types").Tree
-  return Tree.from_list(list, function(data)
-    return data.id
-  end)
+  return tree_from(list)
 end
 
----Legacy `nix-build` command for a Nixpkgs position. `--no-out-link` avoids
----littering `result` symlinks (which the directory filter also ignores).
+---Build a single file position for a runnable `lib/tests` entry. Build-style
+---files are derivations; eval-style files return a lib.runTests failure list.
+---@param file_path string
+---@param root string
+---@param opts neotest-nix.Config?
+---@return neotest.Tree?
+local function lib_positions(file_path, root, opts)
+  local rel = relpath(file_path, root)
+  if rel == nil then
+    return nil
+  end
+
+  local runner = lib_test_runner(rel)
+  local data = {
+    id = file_path,
+    name = vim.fs.basename(file_path),
+    path = file_path,
+    type = "file",
+    range = { 0, 0, 0, 0 },
+  }
+  if runner == "eval" then
+    data.runner = "nix-eval"
+    data.nixpkgs_file_eval = rel
+  else
+    data.runner = "nix"
+    data.nixpkgs_file_build = rel
+  end
+
+  local list = { data }
+  if runner == "eval" then
+    local root_node, source = parse_file(file_path, opts)
+    local order, ranges = {}, {}
+    if root_node ~= nil and source ~= nil then
+      order, ranges = collect_run_tests(root_node, source)
+    end
+
+    if #order > 0 then
+      local namespace = {
+        {
+          id = file_path .. "::tests",
+          name = "tests",
+          path = file_path,
+          type = "namespace",
+          range = { 0, 0, 0, 0 },
+          runner = "nix-eval",
+          nixpkgs_file_eval = rel,
+        },
+      }
+      for _, name in ipairs(order) do
+        table.insert(namespace, {
+          {
+            id = file_path .. "::tests::" .. name,
+            name = name,
+            path = file_path,
+            type = "test",
+            range = ranges[name],
+            runner = "nix-eval",
+            nixpkgs_file_eval = rel,
+            nixpkgs_eval_test = name,
+          },
+        })
+      end
+      table.insert(list, namespace)
+    end
+  end
+
+  return tree_from(list)
+end
+
+---Build a file position for a `nixos/tests/<name>.nix` VM test, targeting
+---`nixosTests.<name>`. A statically findable `testScript` range is recorded so
+---Python-traceback failures map back onto the script (see vm.lua / results.lua).
+---@param file_path string
+---@param root string
+---@param opts neotest-nix.Config?
+---@return neotest.Tree?
+local function nixos_positions(file_path, root, opts)
+  local name = (relpath(file_path, root) or ""):match("^nixos/tests/([^/]+)%.nix$")
+  if name == nil then
+    return nil
+  end
+
+  local test_script_range
+  local root_node, source = parse_file(file_path, opts)
+  if root_node ~= nil and source ~= nil then
+    test_script_range = require("neotest-nix.positions").test_script_range(root_node, source)
+  end
+
+  return tree_from({
+    {
+      id = file_path,
+      name = vim.fs.basename(file_path),
+      path = file_path,
+      type = "file",
+      range = { 0, 0, 0, 0 },
+      runner = "nix",
+      nixpkgs_attr = "nixosTests." .. name,
+      test_script_range = test_script_range,
+    },
+  })
+end
+
+---Build a position tree for a recognized Nixpkgs test file.
+---@param file_path string
+---@param root string
+---@param opts neotest-nix.Config?
+---@return neotest.Tree?
+function M.discover_positions(file_path, root, opts)
+  local kind = M.test_file_kind(file_path, root)
+  if kind == "by-name" then
+    return by_name_positions(file_path, root, opts)
+  elseif kind == "lib" then
+    return lib_positions(file_path, root, opts)
+  elseif kind == "nixos" then
+    return nixos_positions(file_path, root, opts)
+  end
+  return nil
+end
+
+---Legacy command and result runner for a Nixpkgs position. `--no-out-link`
+---avoids littering `result` symlinks (which the directory filter also ignores).
+---All commands are legacy (no flakes, evaluate the working tree in place).
 ---@param position neotest-nix.Position
----@return string[]
+---@return string[] command, string runner
 function M.build_command(position)
-  return { "nix-build", "-A", position.nixpkgs_attr, "--no-out-link" }
+  if position.nixpkgs_file_build ~= nil then
+    return { "nix-build", position.nixpkgs_file_build, "--no-out-link" }, "nix"
+  end
+  if position.nixpkgs_file_eval ~= nil then
+    if position.nixpkgs_eval_test ~= nil then
+      local name =
+        require("neotest-nix.eval").nix_string_literal(vim.json.encode(position.nixpkgs_eval_test))
+      local expr = ([[
+let
+  failures = import ./%s;
+  name = builtins.fromJSON %s;
+in
+builtins.filter (failure: (failure.name or null) == name) failures
+]]):format(position.nixpkgs_file_eval, name)
+      return { "nix-instantiate", "--eval", "--strict", "--json", "--expr", expr }, "nix-eval"
+    end
+    return { "nix-instantiate", "--eval", "--strict", "--json", position.nixpkgs_file_eval },
+      "nix-eval"
+  end
+  return { "nix-build", "-A", position.nixpkgs_attr, "--no-out-link" }, "nix"
 end
 
 return M

@@ -19,6 +19,9 @@ M.system_pattern = "^[a-z0-9_]+%-[a-z0-9_]+$"
 ---@field nix_unit_kind? "flake"|"import"
 ---@field test_script_range? integer[]
 ---@field nixpkgs_attr? string Legacy `nix-build -A` attribute for a Nixpkgs test.
+---@field nixpkgs_file_build? string Root-relative file built with `nix-build <file>`.
+---@field nixpkgs_file_eval? string Root-relative file run with `nix-instantiate --eval`.
+---@field nixpkgs_eval_test? string Single `lib.runTests` test name selected from a Nixpkgs eval file.
 
 local nix_features = {
   "--extra-experimental-features",
@@ -334,24 +337,33 @@ function M.build_spec(args, opts)
 
   local cwd = cwd_for(position.path)
 
-  -- Nixpkgs positions carry a legacy attribute and run with `nix-build -A`,
-  -- which evaluates the working tree in place (no flake copy-to-store). The
-  -- `nix` runner means results parse exactly like a flake `nix build`.
-  if position.nixpkgs_attr ~= nil then
+  -- Nixpkgs positions run with legacy commands (nix-build / nix-instantiate)
+  -- that evaluate the working tree in place, no flake copy-to-store. The runner
+  -- selects result parsing: "nix" parses like a flake build; "nix-eval" parses
+  -- a lib.runTests failure list.
+  local nixpkgs_target = position.nixpkgs_attr
+    or position.nixpkgs_file_build
+    or position.nixpkgs_file_eval
+  if nixpkgs_target ~= nil then
     local nixpkgs = require("neotest-nix.nixpkgs")
+    local command, runner = nixpkgs.build_command(position)
     local run_spec = {
-      command = with_extra_args(nixpkgs.build_command(position), args.extra_args),
+      command = with_extra_args(command, args.extra_args),
       cwd = cwd,
       strategy = process.strategy,
       context = {
-        attr = position.nixpkgs_attr,
+        attr = nixpkgs_target,
         path = position.path,
         pos_id = position.id,
-        runner = "nix",
+        runner = runner,
         type = position.type,
       },
     }
-    run_spec.stream = results.stream(run_spec, tree)
+    -- nix-eval output is a single value parsed at the end; only the streaming
+    -- nix-error scanner applies to plain nix-build runs.
+    if runner == "nix" then
+      run_spec.stream = results.stream(run_spec, tree)
+    end
     return run_spec
   end
 

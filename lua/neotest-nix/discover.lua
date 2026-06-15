@@ -173,7 +173,19 @@ function M.root(dir)
     return nil
   end
 
-  return vim.fs.dirname(marker)
+  local flake_dir = vim.fs.dirname(marker)
+
+  -- Nixpkgs ships nested sub-flakes (e.g. `lib/flake.nix`). Walking up to the
+  -- nearest `flake.nix` would root files under `lib/` at that sub-flake,
+  -- fragmenting the tree into a second adapter root. When the resolved flake
+  -- sits inside a Nixpkgs checkout, prefer the Nixpkgs top so the whole tree
+  -- shares one root.
+  local nixpkgs_root = require("neotest-nix.nixpkgs").detect_root(flake_dir)
+  if nixpkgs_root ~= nil then
+    return nixpkgs_root
+  end
+
+  return flake_dir
 end
 
 ---@param file_path string
@@ -266,24 +278,36 @@ end
 function M.is_test_file(file_path, opts)
   local filename = vim.fs.basename(file_path)
   if filename == "flake.nix" then
-    return true
+    -- Inside a Nixpkgs checkout a `flake.nix` (the root, or a nested sub-flake
+    -- like `lib/flake.nix`) is not a test file: `nix flake check` would evaluate
+    -- the whole tree. The recognized Nixpkgs kinds carry the real tests.
+    local nixpkgs = require("neotest-nix.nixpkgs")
+    return nixpkgs.resolve_root(file_path, opts) == nil
   end
 
   if filename:match("%.nix$") == nil then
     return false
   end
 
-  -- Nixpkgs-style test files (e.g. a `pkgs/by-name` package's tests). Gated on
-  -- the basename so the marker walk only runs for plausible candidates.
-  if filename == "package.nix" then
+  -- Nixpkgs-style test files. Pre-filter on the cheap basename/path signals that
+  -- only ever appear in Nixpkgs, so the marker walk (resolve_root) stays off the
+  -- hot path for ordinary repos and irrelevant files.
+  if
+    filename == "package.nix"
+    or filename == "release.nix"
+    or filename == "misc.nix"
+    or file_path:find("/nixos/tests/", 1, true) ~= nil
+  then
     local nixpkgs = require("neotest-nix.nixpkgs")
     local nixpkgs_root = nixpkgs.resolve_root(file_path, opts)
-    if
-      nixpkgs_root ~= nil
-      and nixpkgs.is_nixpkgs_test_file(file_path, nixpkgs_root)
-      and has_passthru_tests(file_path)
-    then
-      return true
+    if nixpkgs_root ~= nil then
+      local kind = nixpkgs.test_file_kind(file_path, nixpkgs_root)
+      if kind == "by-name" then
+        -- A package is a test file only when it declares passthru.tests.
+        return has_passthru_tests(file_path)
+      elseif kind ~= nil then
+        return true
+      end
     end
   end
 

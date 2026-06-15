@@ -211,4 +211,61 @@ describe("discover", function()
       discover.filter_dir("development", "pkgs/development", tmp, { nixpkgs_mode = false })
     )
   end)
+
+  it("recognizes lib and nixos test files in a Nixpkgs checkout", function()
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "lib", "tests"), "p")
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "nixos", "tests"), "p")
+    mkdir(vim.fs.joinpath(tmp, "pkgs", "by-name"))
+
+    local release = vim.fs.joinpath(tmp, "lib", "tests", "release.nix")
+    local nixos = vim.fs.joinpath(tmp, "nixos", "tests", "login.nix")
+    local helper = vim.fs.joinpath(tmp, "nixos", "tests", "make-test-python.nix")
+    write_file(release, { "{ }" })
+    write_file(nixos, { '{ testScript = ""; }' })
+    write_file(helper, { "{ }" })
+
+    assert.is_true(discover.is_test_file(release))
+    assert.is_true(discover.is_test_file(nixos))
+    -- infrastructure files are not tests
+    assert.is_false(discover.is_test_file(helper))
+  end)
+
+  it("roots a nested sub-flake at the Nixpkgs top", function()
+    -- Nixpkgs ships `lib/flake.nix`. Walking to the nearest flake.nix would
+    -- root files under lib/ at that sub-flake, splitting the tree into a second
+    -- adapter root. They must collapse to the Nixpkgs top instead.
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "lib", "tests"), "p")
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "nixos"), "p")
+    mkdir(vim.fs.joinpath(tmp, "pkgs", "by-name"))
+    write_file(vim.fs.joinpath(tmp, "flake.nix"), { "{}" })
+    write_file(vim.fs.joinpath(tmp, "lib", "flake.nix"), { "{}" })
+
+    local misc = vim.fs.joinpath(tmp, "lib", "tests", "misc.nix")
+    write_file(misc, { "{ }" })
+
+    assert.are.equal(tmp, discover.root(misc))
+    assert.are.equal(tmp, discover.root(vim.fs.joinpath(tmp, "lib", "flake.nix")))
+  end)
+
+  it("does not treat flake.nix as a test file inside a Nixpkgs checkout", function()
+    -- The root flake and any nested sub-flake would otherwise be claimed by the
+    -- flake.nix short-circuit and run `nix flake check` over the whole tree.
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "lib"), "p")
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "nixos"), "p")
+    mkdir(vim.fs.joinpath(tmp, "pkgs", "by-name"))
+    local root_flake = vim.fs.joinpath(tmp, "flake.nix")
+    local sub_flake = vim.fs.joinpath(tmp, "lib", "flake.nix")
+    write_file(root_flake, { "{}" })
+    write_file(sub_flake, { "{}" })
+
+    assert.is_false(discover.is_test_file(root_flake))
+    assert.is_false(discover.is_test_file(sub_flake))
+
+    -- A plain flake project keeps the flake.nix-is-a-test-file behaviour.
+    local plain = vim.fn.tempname()
+    mkdir(plain)
+    local plain_flake = vim.fs.joinpath(plain, "flake.nix")
+    write_file(plain_flake, { "{}" })
+    assert.is_true(discover.is_test_file(plain_flake))
+  end)
 end)
