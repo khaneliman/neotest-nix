@@ -183,6 +183,80 @@ describe("nixpkgs", function()
       )
     end)
 
+    it("falls back to eval when static parse finds no tests", function()
+      local root = nixpkgs_tree()
+      -- Computed tests: static parse cannot see the names.
+      local pkg = write_package(root, "computed", {
+        "{ stdenv, callPackages }:",
+        "stdenv.mkDerivation {",
+        "  passthru.tests = callPackages ./tests.nix { };",
+        "}",
+      })
+
+      local eval_module = package.loaded["neotest-nix.eval"]
+      local seen_attr
+      package.loaded["neotest-nix.eval"] = {
+        nixpkgs_test_names = function(_, attr)
+          seen_attr = attr
+          return { "alpha", "beta" }
+        end,
+      }
+
+      local tree = nixpkgs.discover_positions(pkg, root, { discover_nixpkgs_eval_tests = true })
+      package.loaded["neotest-nix.eval"] = eval_module
+
+      assert.are.equal("computed", seen_attr)
+      local attrs = test_attrs(tree)
+      assert.are.equal("computed.tests.alpha", attrs.alpha)
+      assert.are.equal("computed.tests.beta", attrs.beta)
+    end)
+
+    it("does not eval when the option is disabled", function()
+      local root = nixpkgs_tree()
+      local pkg = write_package(root, "computed", {
+        "{ stdenv, callPackages }:",
+        "stdenv.mkDerivation { passthru.tests = callPackages ./tests.nix { }; }",
+      })
+
+      local eval_module = package.loaded["neotest-nix.eval"]
+      local called = false
+      package.loaded["neotest-nix.eval"] = {
+        nixpkgs_test_names = function()
+          called = true
+          return { "alpha" }
+        end,
+      }
+
+      local tree = nixpkgs.discover_positions(pkg, root, {})
+      package.loaded["neotest-nix.eval"] = eval_module
+
+      assert.is_false(called)
+      assert.are.same({}, test_attrs(tree))
+    end)
+
+    it("does not eval when the static parse already found tests", function()
+      local root = nixpkgs_tree()
+      local pkg = write_package(root, "static", {
+        "{ stdenv }:",
+        "stdenv.mkDerivation { passthru.tests = { only = { }; }; }",
+      })
+
+      local eval_module = package.loaded["neotest-nix.eval"]
+      local called = false
+      package.loaded["neotest-nix.eval"] = {
+        nixpkgs_test_names = function()
+          called = true
+          return { "eval_should_not_run" }
+        end,
+      }
+
+      local tree = nixpkgs.discover_positions(pkg, root, { discover_nixpkgs_eval_tests = true })
+      package.loaded["neotest-nix.eval"] = eval_module
+
+      assert.is_false(called)
+      assert.are.equal("static.tests.only", test_attrs(tree).only)
+    end)
+
     it("yields just the file node when no tests are declared", function()
       local root = nixpkgs_tree()
       local pkg = write_package(root, "plain", {

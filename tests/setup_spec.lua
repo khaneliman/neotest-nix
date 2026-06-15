@@ -153,6 +153,8 @@ describe("config validation", function()
         discover_eval_checks = true,
         eval_outputs = { { attr = "checks", match = "^test" } },
         nix_unit_flakes = { { path = "lib/tests", flake = ".#tests" } },
+        nixpkgs_mode = true,
+        discover_nixpkgs_eval_tests = true,
       })
     end)
   end)
@@ -162,6 +164,14 @@ describe("config validation", function()
     assert.has_error(function()
       ---@diagnostic disable-next-line: assign-type-mismatch
       adapter.setup({ discover_eval_checks = "yes" })
+    end)
+  end)
+
+  it("rejects a non-boolean discover_nixpkgs_eval_tests", function()
+    local adapter = require("neotest-nix")
+    assert.has_error(function()
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      adapter.setup({ discover_nixpkgs_eval_tests = "yes" })
     end)
   end)
 
