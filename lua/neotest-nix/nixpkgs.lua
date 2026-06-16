@@ -66,7 +66,9 @@ function M.detect_root(file_path)
   -- raw prefix match against known roots before paying for vim.fs.normalize
   -- (which splits and rejoins the whole path) on every file.
   for _, root in ipairs(known_roots) do
-    if file_path == root or file_path:sub(1, #root + 1) == root .. "/" then
+    local len = #root
+    local byte = string.byte(file_path, len + 1)
+    if file_path == root or ((byte == 47 or byte == 92) and file_path:find(root, 1, true) == 1) then
       return root
     end
   end
@@ -74,7 +76,11 @@ function M.detect_root(file_path)
   local normalized = vim.fs.normalize(file_path)
 
   for _, root in ipairs(known_roots) do
-    if normalized == root or normalized:sub(1, #root + 1) == root .. "/" then
+    local len = #root
+    local byte = string.byte(normalized, len + 1)
+    if
+      normalized == root or ((byte == 47 or byte == 92) and normalized:find(root, 1, true) == 1)
+    then
       return root
     end
   end
@@ -165,10 +171,15 @@ local is_root_cache = {}
 ---@param opts neotest-nix.Config?
 ---@return boolean
 function M.is_root(root, opts)
-  opts = opts or {}
-  local mode = opts.nixpkgs_mode
-  local cache_key = root .. ":" .. tostring(mode)
-  local cached = is_root_cache[cache_key]
+  local mode = opts and opts.nixpkgs_mode
+  local root_cache = is_root_cache[root]
+  if root_cache == nil then
+    root_cache = {}
+    is_root_cache[root] = root_cache
+  end
+
+  local mode_key = mode == nil and "nil" or mode
+  local cached = root_cache[mode_key]
   if cached ~= nil then
     return cached
   end
@@ -176,15 +187,13 @@ function M.is_root(root, opts)
   local result
   if mode == false then
     result = false
-  end
-  if mode == true then
+  elseif mode == true then
     result = true
-  end
-  if result == nil then
+  else
     result = has_markers(root)
   end
 
-  is_root_cache[cache_key] = result
+  root_cache[mode_key] = result
   return result
 end
 
@@ -195,9 +204,10 @@ local function relpath(file_path, root)
   if file_path == root then
     return ""
   end
-  local prefix = root .. "/"
-  if file_path:sub(1, #prefix) == prefix then
-    return file_path:sub(#prefix + 1)
+  local len_root = #root
+  local byte = string.byte(file_path, len_root + 1)
+  if (byte == 47 or byte == 92) and file_path:find(root, 1, true) == 1 then
+    return file_path:sub(len_root + 2)
   end
 
   local normalized = vim.fs.normalize(file_path)
@@ -205,11 +215,12 @@ local function relpath(file_path, root)
   if normalized == normalized_root then
     return ""
   end
-  prefix = normalized_root .. "/"
-  if normalized:sub(1, #prefix) ~= prefix then
-    return nil
+  local len_norm_root = #normalized_root
+  local norm_byte = string.byte(normalized, len_norm_root + 1)
+  if (norm_byte == 47 or norm_byte == 92) and normalized:find(normalized_root, 1, true) == 1 then
+    return normalized:sub(len_norm_root + 2)
   end
-  return normalized:sub(#prefix + 1)
+  return nil
 end
 
 ---Attribute name for a `pkgs/by-name` package file. The by-name convention
@@ -319,9 +330,9 @@ local function is_lineage(a, b)
   if len_a == len_b then
     return a == b
   elseif len_a > len_b then
-    return a:sub(1, len_b + 1) == b .. "/"
+    return a:find(b, 1, true) == 1 and string.byte(a, len_b + 1) == 47
   else
-    return b:sub(1, len_a + 1) == a .. "/"
+    return b:find(a, 1, true) == 1 and string.byte(b, len_a + 1) == 47
   end
 end
 
@@ -344,11 +355,16 @@ function M.should_descend(rel_path)
   if rel:find("\\", 1, true) then
     rel = rel:gsub("\\", "/")
   end
-  if rel:sub(1, 2) == "./" then
+  local len = #rel
+  if len >= 2 and string.byte(rel, 1) == 46 and string.byte(rel, 2) == 47 then
     rel = rel:sub(3)
+    len = #rel
   end
-  if rel:sub(-1) == "/" then
-    rel = rel:sub(1, -2)
+  if len >= 1 then
+    local last_byte = string.byte(rel, len)
+    if last_byte == 47 or last_byte == 92 then
+      rel = rel:sub(1, len - 1)
+    end
   end
   if rel == "" or rel == "." then
     return true
@@ -989,6 +1005,14 @@ builtins.filter (failure: (failure.name or null) == name) failures
       "nix-eval"
   end
   return { "nix-build", "-A", position.nixpkgs_attr, "--no-out-link" }, "nix"
+end
+
+function M.clear_cache()
+  marker_cache = {}
+  known_roots = {}
+  directory_root_cache = {}
+  is_root_cache = {}
+  eval_names_cache = {}
 end
 
 return M

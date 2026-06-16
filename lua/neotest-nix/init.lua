@@ -134,6 +134,8 @@ function M.setup(opts)
   opts = opts or {}
   validate(opts)
   M._opts = opts
+  require("neotest-nix.discover").clear_cache()
+  require("neotest-nix.nixpkgs").clear_cache()
   ---@diagnostic disable-next-line: return-type-mismatch
   return M
 end

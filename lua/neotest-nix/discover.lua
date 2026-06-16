@@ -225,10 +225,16 @@ local function source_has_passthru_tests(content)
   if content:find("tests", 1, true) == nil then
     return false
   end
+  if content:find("passthru.tests", 1, true) ~= nil then
+    return true
+  end
   if content:find("passthru%s*%.%s*tests") ~= nil then
     return true
   end
   -- A `passthru = { ... }` block that binds `tests`.
+  if content:find("tests = ", 1, true) ~= nil or content:find("tests=", 1, true) ~= nil then
+    return true
+  end
   return content:find("tests%s*=") ~= nil
 end
 
@@ -236,6 +242,15 @@ end
 -- discovery on many events; without this every pass re-reads all ~21k packages.
 ---@type table<string, { mtime: integer, result: boolean }>
 local passthru_cache = {}
+
+-- Cache whether roots are under /nix/store/
+---@type table<string, boolean>
+local store_root_cache = {}
+
+function M.clear_cache()
+  passthru_cache = {}
+  store_root_cache = {}
+end
 
 ---Cheap gate for a Nixpkgs `package.nix`: does it declare `passthru.tests`? The
 ---tree-sitter parse in nixpkgs.discover_positions is authoritative for the
@@ -279,10 +294,7 @@ function M.is_test_file(file_path, opts)
     return false
   end
 
-  local parent, filename = file_path:match("([^/\\]+)[/\\]([^/\\]+)$")
-  if filename == nil then
-    filename = file_path
-  end
+  local filename = file_path:match("[^/\\]+$") or file_path
 
   if filename == "flake.nix" then
     -- Inside a Nixpkgs checkout a `flake.nix` (the root, or a nested sub-flake
@@ -295,8 +307,14 @@ function M.is_test_file(file_path, opts)
   -- A file qualifies as test-named when either the file itself or its
   -- immediate parent directory is test-named (e.g. `tests/default.nix`).
   -- Use case-insensitive pattern matching instead of lower() to avoid string allocations.
-  local test_named = filename:find("[tT][eE][sS][tT]") ~= nil
-    or (parent ~= nil and parent:find("[tT][eE][sS][tT]") ~= nil)
+  local test_named = false
+  if file_path:find("[tT][eE][sS][tT]") ~= nil then
+    test_named = filename:find("[tT][eE][sS][tT]") ~= nil
+    if not test_named then
+      local parent = file_path:match("([^/\\]+)[/\\][^/\\]+$")
+      test_named = parent ~= nil and parent:find("[tT][eE][sS][tT]") ~= nil
+    end
+  end
 
   -- Cheap signals for a file that could be a Nixpkgs test, used to keep the
   -- marker walk (resolve_root) off the hot path for ordinary repos.
@@ -340,12 +358,16 @@ function M.filter_dir(name, rel_path, root, opts)
     return false
   end
 
-  local absolute = root .. "/" .. rel_path
-  if absolute:sub(1, 11) == "/nix/store/" or absolute:sub(1, 12) == "//nix/store/" then
+  local is_store = store_root_cache[root]
+  if is_store == nil then
+    is_store = root:sub(1, 11) == "/nix/store/" or root:sub(1, 12) == "//nix/store/"
+    store_root_cache[root] = is_store
+  end
+  if is_store then
     return false
   end
 
-  if excluded_dirs[name] or name:sub(1, 7) == "result-" then
+  if excluded_dirs[name] or (name:find("result-", 1, true) == 1) then
     return false
   end
 
