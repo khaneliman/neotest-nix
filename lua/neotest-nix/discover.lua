@@ -9,10 +9,6 @@ local excluded_dirs = {
   ["result"] = true,
 }
 
-local output_dir_patterns = {
-  "^result%-",
-}
-
 ---@param path string
 ---@return boolean
 local function path_exists(path)
@@ -223,6 +219,9 @@ end
 ---@param content string
 ---@return boolean
 local function source_has_passthru_tests(content)
+  if content:find("passthru", 1, true) == nil then
+    return false
+  end
   if content:find("tests", 1, true) == nil then
     return false
   end
@@ -230,7 +229,7 @@ local function source_has_passthru_tests(content)
     return true
   end
   -- A `passthru = { ... }` block that binds `tests`.
-  return content:find("passthru", 1, true) ~= nil and content:find("tests%s*=") ~= nil
+  return content:find("tests%s*=") ~= nil
 end
 
 -- Gate results cached per file and invalidated by mtime. Neotest re-runs
@@ -276,7 +275,15 @@ end
 ---@param opts neotest-nix.Config?
 ---@return boolean
 function M.is_test_file(file_path, opts)
-  local filename = file_path:match("[^/\\]+$") or file_path
+  if file_path:sub(-4) ~= ".nix" then
+    return false
+  end
+
+  local parent, filename = file_path:match("([^/\\]+)[/\\]([^/\\]+)$")
+  if filename == nil then
+    filename = file_path
+  end
+
   if filename == "flake.nix" then
     -- Inside a Nixpkgs checkout a `flake.nix` (the root, or a nested sub-flake
     -- like `lib/flake.nix`) is not a test file: `nix flake check` would evaluate
@@ -285,15 +292,11 @@ function M.is_test_file(file_path, opts)
     return nixpkgs.resolve_root(file_path, opts) == nil
   end
 
-  if filename:match("%.nix$") == nil then
-    return false
-  end
-
   -- A file qualifies as test-named when either the file itself or its
   -- immediate parent directory is test-named (e.g. `tests/default.nix`).
-  local parent = file_path:match("([^/\\]+)[/\\][^/\\]+$")
-  local test_named = filename:lower():match("test") ~= nil
-    or (parent ~= nil and parent:lower():match("test") ~= nil)
+  -- Use case-insensitive pattern matching instead of lower() to avoid string allocations.
+  local test_named = filename:find("[tT][eE][sS][tT]") ~= nil
+    or (parent ~= nil and parent:find("[tT][eE][sS][tT]") ~= nil)
 
   -- Cheap signals for a file that could be a Nixpkgs test, used to keep the
   -- marker walk (resolve_root) off the hot path for ordinary repos.
@@ -338,18 +341,12 @@ function M.filter_dir(name, rel_path, root, opts)
   end
 
   local absolute = root .. "/" .. rel_path
-  if absolute:match("^/nix/store/") or absolute:match("^//nix/store/") then
+  if absolute:sub(1, 11) == "/nix/store/" or absolute:sub(1, 12) == "//nix/store/" then
     return false
   end
 
-  if excluded_dirs[name] then
+  if excluded_dirs[name] or name:sub(1, 7) == "result-" then
     return false
-  end
-
-  for _, pattern in ipairs(output_dir_patterns) do
-    if name:match(pattern) then
-      return false
-    end
   end
 
   -- On a Nixpkgs root, prune everything outside the supported subtrees; the

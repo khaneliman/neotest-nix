@@ -55,6 +55,9 @@ end
 ---@type string[]
 local known_roots = {}
 
+---@type table<string, string|boolean>
+local directory_root_cache = {}
+
 ---Walk upward from a file (or directory) to the nearest Nixpkgs root.
 ---@param file_path string
 ---@return string?
@@ -80,19 +83,36 @@ function M.detect_root(file_path)
   local dir = (stat ~= nil and stat.type == "directory") and normalized
     or vim.fs.dirname(normalized)
 
-  while dir ~= nil and dir ~= "" do
-    if has_markers(dir) then
-      known_roots[#known_roots + 1] = dir
-      return dir
-    end
-    local parent = vim.fs.dirname(dir)
-    if parent == dir then
-      break
-    end
-    dir = parent
+  if dir == nil or dir == "" then
+    return nil
   end
 
-  return nil
+  local cached = directory_root_cache[dir]
+  if cached ~= nil then
+    if cached == false then
+      return nil
+    end
+    ---@cast cached string
+    return cached
+  end
+
+  local current = dir
+  local resolved_root = nil
+  while current ~= nil and current ~= "" do
+    if has_markers(current) then
+      resolved_root = current
+      known_roots[#known_roots + 1] = current
+      break
+    end
+    local parent = vim.fs.dirname(current)
+    if parent == current then
+      break
+    end
+    current = parent
+  end
+
+  directory_root_cache[dir] = resolved_root or false
+  return resolved_root
 end
 
 ---Resolve how a Nixpkgs root should be treated.
@@ -137,6 +157,8 @@ function M.resolve_root(file_path, opts)
   return nil
 end
 
+local is_root_cache = {}
+
 ---Whether an adapter root is a Nixpkgs root in nixpkgs mode. Used by the
 ---directory filter, which receives the root but not a file path.
 ---@param root string
@@ -144,25 +166,46 @@ end
 ---@return boolean
 function M.is_root(root, opts)
   opts = opts or {}
-  if opts.nixpkgs_mode == false then
-    return false
+  local mode = opts.nixpkgs_mode
+  local cache_key = root .. ":" .. tostring(mode)
+  local cached = is_root_cache[cache_key]
+  if cached ~= nil then
+    return cached
   end
-  if opts.nixpkgs_mode == true then
-    return true
+
+  local result
+  if mode == false then
+    result = false
   end
-  return has_markers(root)
+  if mode == true then
+    result = true
+  end
+  if result == nil then
+    result = has_markers(root)
+  end
+
+  is_root_cache[cache_key] = result
+  return result
 end
 
 ---@param file_path string
 ---@param root string
 ---@return string?
 local function relpath(file_path, root)
+  if file_path == root then
+    return ""
+  end
+  local prefix = root .. "/"
+  if file_path:sub(1, #prefix) == prefix then
+    return file_path:sub(#prefix + 1)
+  end
+
   local normalized = vim.fs.normalize(file_path)
   local normalized_root = vim.fs.normalize(root)
   if normalized == normalized_root then
     return ""
   end
-  local prefix = normalized_root .. "/"
+  prefix = normalized_root .. "/"
   if normalized:sub(1, #prefix) ~= prefix then
     return nil
   end
@@ -231,13 +274,19 @@ end
 ---@param root string
 ---@return "by-name"|"lib"|"nixos"|nil
 function M.test_file_kind(file_path, root)
-  local rel = relpath(file_path, root)
-  if rel == nil then
+  local filename = file_path:match("[^/\\]+$") or file_path
+
+  if filename == "package.nix" then
+    local rel = relpath(file_path, root)
+    if rel ~= nil and rel:match("^pkgs/by%-name/[^/]+/[^/]+/package%.nix$") ~= nil then
+      return "by-name"
+    end
     return nil
   end
 
-  if rel:match("^pkgs/by%-name/[^/]+/[^/]+/package%.nix$") ~= nil then
-    return "by-name"
+  local rel = relpath(file_path, root)
+  if rel == nil then
+    return nil
   end
 
   if lib_test_runner(rel) ~= nil then
@@ -265,7 +314,15 @@ end
 ---@param b string
 ---@return boolean
 local function is_lineage(a, b)
-  return a == b or a:sub(1, #b + 1) == b .. "/" or b:sub(1, #a + 1) == a .. "/"
+  local len_a = #a
+  local len_b = #b
+  if len_a == len_b then
+    return a == b
+  elseif len_a > len_b then
+    return a:sub(1, len_b + 1) == b .. "/"
+  else
+    return b:sub(1, len_a + 1) == a .. "/"
+  end
 end
 
 -- Subtrees the discovery walk descends into on a Nixpkgs root. Everything else
@@ -283,8 +340,16 @@ local allowed_prefixes = {
 ---@param rel_path string
 ---@return boolean
 function M.should_descend(rel_path)
-  local rel = vim.fs.normalize(rel_path)
-  rel = rel:gsub("^%./", ""):gsub("^/", ""):gsub("/$", "")
+  local rel = rel_path
+  if rel:find("\\", 1, true) then
+    rel = rel:gsub("\\", "/")
+  end
+  if rel:sub(1, 2) == "./" then
+    rel = rel:sub(3)
+  end
+  if rel:sub(-1) == "/" then
+    rel = rel:sub(1, -2)
+  end
   if rel == "" or rel == "." then
     return true
   end
