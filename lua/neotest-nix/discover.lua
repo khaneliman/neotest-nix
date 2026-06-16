@@ -276,7 +276,7 @@ end
 ---@param opts neotest-nix.Config?
 ---@return boolean
 function M.is_test_file(file_path, opts)
-  local filename = vim.fs.basename(file_path)
+  local filename = file_path:match("[^/\\]+$") or file_path
   if filename == "flake.nix" then
     -- Inside a Nixpkgs checkout a `flake.nix` (the root, or a nested sub-flake
     -- like `lib/flake.nix`) is not a test file: `nix flake check` would evaluate
@@ -291,7 +291,7 @@ function M.is_test_file(file_path, opts)
 
   -- A file qualifies as test-named when either the file itself or its
   -- immediate parent directory is test-named (e.g. `tests/default.nix`).
-  local parent = vim.fs.basename(dirname(file_path))
+  local parent = file_path:match("([^/\\]+)[/\\][^/\\]+$")
   local test_named = filename:lower():match("test") ~= nil
     or (parent ~= nil and parent:lower():match("test") ~= nil)
 
@@ -337,8 +337,8 @@ function M.filter_dir(name, rel_path, root, opts)
     return false
   end
 
-  local absolute = vim.fs.normalize(vim.fs.joinpath(root, rel_path))
-  if absolute:match("^/nix/store/") then
+  local absolute = root .. "/" .. rel_path
+  if absolute:match("^/nix/store/") or absolute:match("^//nix/store/") then
     return false
   end
 
