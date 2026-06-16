@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.2.0](https://github.com/khaneliman/neotest-nix/compare/v2.1.6...v2.2.0) (2026-06-16)
+
+
+### Features
+
+* **log:** add opt-in debug logging and timing ([8552130](https://github.com/khaneliman/neotest-nix/commit/85521307c078f0e52adec3012e3bb2b6210a1a97))
+* **nixpkgs:** discover lib/tests and nixos/tests ([a5b6a50](https://github.com/khaneliman/neotest-nix/commit/a5b6a501ef8d0176590d16cb32a4154a4ad3192f))
+* **nixpkgs:** eval-enumerate computed passthru.tests ([296daec](https://github.com/khaneliman/neotest-nix/commit/296daec856d3924d3b5a7dd3ba9b6553374d949e))
+* **nixpkgs:** run by-name passthru.tests via legacy nix-build ([45ebf08](https://github.com/khaneliman/neotest-nix/commit/45ebf08945b57f2327f0dee51cd52bf5380faf68))
+
+
+### Bug Fixes
+
+* **nixpkgs:** suppress generic nix-unit discovery in a checkout ([fc82d0b](https://github.com/khaneliman/neotest-nix/commit/fc82d0b9a08d25fd24197efc1f976043620b0b7b))
+
+
+### Performance Improvements
+
+* **discover:** optimize path parsing for test discovery ([6615761](https://github.com/khaneliman/neotest-nix/commit/66157617ef156e31f17e442004fa08b628e3f0b7))
+* **discovery:** delay parent match and eliminate string allocations ([da68662](https://github.com/khaneliman/neotest-nix/commit/da686623326c12d53d8bb1630030adc65c164e10))
+* **discovery:** optimize hot paths and nixpkgs walk ([72d5577](https://github.com/khaneliman/neotest-nix/commit/72d55770a362553d8ed0f34c87a356d6873721a7))
+* **nixpkgs:** cache root detection and the test gate ([c6177c5](https://github.com/khaneliman/neotest-nix/commit/c6177c5ea180bfd93d334de7ebe32b2ffbfcba78))
+* **nixpkgs:** only discover packages that declare tests ([4ced14c](https://github.com/khaneliman/neotest-nix/commit/4ced14c4bc941093bda8c16d4db84e4b3069fa0e))
+
 ## [2.1.6](https://github.com/khaneliman/neotest-nix/compare/v2.1.5...v2.1.6) (2026-06-13)
 
 
