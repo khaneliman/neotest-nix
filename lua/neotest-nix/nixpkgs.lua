@@ -398,6 +398,53 @@ local function binding_expression(binding)
   return expressions and expressions[1] or nil
 end
 
+---Decode an attrpath element: an identifier verbatim, or a quoted key
+---(`"1.0"`) without interpolation. Returns nil for anything dynamic.
+---@param node TSNode
+---@param source string
+---@return string?
+local function attr_element_name(node, source)
+  local kind = node:type()
+  if kind == "identifier" then
+    return vim.treesitter.get_node_text(node, source)
+  end
+  if kind == "string_expression" then
+    local text = vim.treesitter.get_node_text(node, source)
+    if text:find("${", 1, true) == nil then
+      local ok, decoded = pcall(vim.json.decode, text)
+      if ok and type(decoded) == "string" then
+        return decoded
+      end
+    end
+  end
+  return nil
+end
+
+---Quote an attribute-path segment for splicing into a legacy `-A` argument.
+---Bare Nix identifiers pass through; anything else (dots, leading digits, ...)
+---is double-quoted with Nix string escaping so `1.0` becomes `"1.0"` instead
+---of parsing as two nested attrs.
+---@param segment string
+---@return string
+local function quote_attr_segment(segment)
+  if segment:match("^[a-zA-Z_][a-zA-Z0-9_'%-]*$") ~= nil then
+    return segment
+  end
+  local escaped = segment:gsub('[\\"]', "\\%0"):gsub("%${", "\\${")
+  return '"' .. escaped .. '"'
+end
+
+---Join attribute-path segments into a `-A`-safe dotted path.
+---@param segments string[]
+---@return string
+local function join_attr_path(segments)
+  local quoted = {}
+  for index, segment in ipairs(segments) do
+    quoted[index] = quote_attr_segment(segment)
+  end
+  return table.concat(quoted, ".")
+end
+
 ---@param node TSNode
 ---@return boolean
 local function is_attrset_node(node)
@@ -433,6 +480,9 @@ local function collect_tests(root_node, source)
     end
   end
 
+  ---Name of the attr a select expression picks: the last attrpath element,
+  ---identifier or quoted (`drv.tests."foo-bar"`). Reads only the attrpath
+  ---field so an `or` default (`nixosTests.foo or fallback`) is ignored.
   ---@param node TSNode
   ---@return string?, TSNode?
   local function select_leaf(node)
@@ -440,19 +490,23 @@ local function collect_tests(root_node, source)
       return nil, nil
     end
 
-    ---@type TSNode?
-    local last
-    local function walk(current)
-      if current:type() == "identifier" then
-        last = current
-      end
-      for child in current:iter_children() do
-        walk(child)
-      end
+    local attrpath = node:field("attrpath")
+    attrpath = attrpath and attrpath[1] or nil
+    if attrpath == nil then
+      return nil, nil
     end
 
-    walk(node)
-    return last ~= nil and vim.treesitter.get_node_text(last, source) or nil, last
+    local attrs = attrpath:field("attr")
+    local last = attrs and attrs[#attrs] or nil
+    if last == nil then
+      return nil, nil
+    end
+
+    local name = attr_element_name(last, source)
+    if name == nil then
+      return nil, nil
+    end
+    return name, last
   end
 
   ---@param attrset TSNode
@@ -574,17 +628,9 @@ local function binding_name(binding, source)
   end
 
   for child in attrpath:iter_children() do
-    local kind = child:type()
-    if kind == "identifier" then
-      return vim.treesitter.get_node_text(child, source), child
-    elseif kind == "string_expression" then
-      local text = vim.treesitter.get_node_text(child, source)
-      if text:find("${", 1, true) == nil then
-        local ok, decoded = pcall(vim.json.decode, text)
-        if ok and type(decoded) == "string" then
-          return decoded, child
-        end
-      end
+    local name = attr_element_name(child, source)
+    if name ~= nil then
+      return name, child
     end
   end
 
@@ -816,7 +862,7 @@ local function by_name_positions(file_path, root, opts)
     end
   end
 
-  local tests_attr = attr .. ".tests"
+  local tests_attr = join_attr_path({ attr, "tests" })
   local list = {
     {
       id = file_path,
@@ -850,7 +896,7 @@ local function by_name_positions(file_path, root, opts)
           type = "test",
           range = ranges[name],
           runner = "nix",
-          nixpkgs_attr = tests_attr .. "." .. name,
+          nixpkgs_attr = tests_attr .. "." .. quote_attr_segment(name),
         },
       })
     end
@@ -956,7 +1002,7 @@ local function nixos_positions(file_path, root, opts)
       type = "file",
       range = { 0, 0, 0, 0 },
       runner = "nix",
-      nixpkgs_attr = "nixosTests." .. name,
+      nixpkgs_attr = join_attr_path({ "nixosTests", name }),
       test_script_range = test_script_range,
     },
   })
@@ -1004,6 +1050,8 @@ builtins.filter (failure: (failure.name or null) == name) failures
     return { "nix-instantiate", "--eval", "--strict", "--json", position.nixpkgs_file_eval },
       "nix-eval"
   end
+  -- `nixpkgs_attr` segments are quoted at construction (join_attr_path), so the
+  -- dotted string is already a valid attrpath for `-A`.
   return { "nix-build", "-A", position.nixpkgs_attr, "--no-out-link" }, "nix"
 end
 

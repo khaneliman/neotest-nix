@@ -228,6 +228,55 @@ describe("nixpkgs", function()
       )
     end)
 
+    it("quotes test names that are not bare identifiers", function()
+      local root = nixpkgs_tree()
+      local pkg = write_package(root, "hello", {
+        "{ stdenv }:",
+        "stdenv.mkDerivation {",
+        "  passthru.tests = {",
+        '    "1.0" = { };',
+        "    plain = { };",
+        "  };",
+        "}",
+      })
+
+      local attrs = test_attrs(nixpkgs.discover_positions(pkg, root, {}))
+      assert.are.equal('hello.tests."1.0"', attrs["1.0"])
+      assert.are.equal("hello.tests.plain", attrs.plain)
+
+      local command = nixpkgs.build_command({ nixpkgs_attr = attrs["1.0"] })
+      assert.same({ "nix-build", "-A", 'hello.tests."1.0"', "--no-out-link" }, command)
+    end)
+
+    it("selects the attr, not the or-fallback, from a select expression", function()
+      local root = nixpkgs_tree()
+      local pkg = write_package(root, "guarded", {
+        "{ nixosTests, fallback }:",
+        "stdenv.mkDerivation {",
+        "  passthru.tests = nixosTests.foo or fallback;",
+        "}",
+      })
+
+      local attrs = test_attrs(nixpkgs.discover_positions(pkg, root, {}))
+      assert.are.equal("guarded.tests.foo", attrs.foo)
+      assert.is_nil(attrs.fallback)
+    end)
+
+    it("selects a quoted leaf attr", function()
+      local root = nixpkgs_tree()
+      local pkg = write_package(root, "quoted", {
+        "{ drv }:",
+        "stdenv.mkDerivation {",
+        '  passthru.tests = drv.tests."foo-bar";',
+        "}",
+      })
+
+      local attrs = test_attrs(nixpkgs.discover_positions(pkg, root, {}))
+      assert.are.equal("quoted.tests.foo-bar", attrs["foo-bar"])
+      assert.is_nil(attrs.tests)
+      assert.is_nil(attrs.drv)
+    end)
+
     it("ignores nested attrs inside computed passthru tests", function()
       local root = nixpkgs_tree()
       local pkg = write_package(root, "computed", {
