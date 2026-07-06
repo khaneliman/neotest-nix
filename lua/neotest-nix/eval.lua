@@ -9,6 +9,9 @@ local default_eval_outputs = {
   { attr = "checks" },
 }
 
+---@type table<string, string>
+local current_system_cache = {}
+
 ---@class neotest-nix.SystemResult
 ---@field code integer
 ---@field stdout string?
@@ -29,6 +32,16 @@ local function run(command, root)
   return future.wait()
 end
 
+---@param label string
+---@param result neotest-nix.SystemResult
+local function log_failure(label, result)
+  local stderr = vim.trim(result.stderr or "")
+  local stdout = vim.trim(result.stdout or "")
+  require("neotest-nix.log").debug(
+    ("eval %s failed code=%d stderr=%s stdout=%s"):format(label, result.code, stderr, stdout)
+  )
+end
+
 ---@param names string[]
 ---@param pattern string?
 ---@return string[]
@@ -46,6 +59,29 @@ local function filter_names(names, pattern)
   return filtered
 end
 
+---@param root string
+---@return string?
+function M.current_system(root)
+  if current_system_cache[root] ~= nil then
+    return current_system_cache[root]
+  end
+
+  -- Current system: cheap impure builtin, does not evaluate the flake.
+  local command = { "nix", "eval", "--impure", "--raw" }
+  vim.list_extend(command, nix_command_features)
+  vim.list_extend(command, { "--expr", "builtins.currentSystem" })
+
+  local result = run(command, root)
+  if result.code ~= 0 or result.stdout == nil or result.stdout == "" then
+    log_failure("current_system", result)
+    return nil
+  end
+
+  local system = vim.trim(result.stdout)
+  current_system_cache[root] = system
+  return system
+end
+
 ---Enumerate flake outputs per system by evaluating the flake.
 ---@param root string
 ---@param specs neotest-nix.EvalOutput[]?
@@ -53,16 +89,10 @@ end
 function M.eval_outputs(root, specs)
   specs = specs or default_eval_outputs
 
-  -- Current system: cheap impure builtin, does not evaluate the flake.
-  local system_command = { "nix", "eval", "--impure", "--raw" }
-  vim.list_extend(system_command, nix_command_features)
-  vim.list_extend(system_command, { "--expr", "builtins.currentSystem" })
-
-  local system_result = run(system_command, root)
-  if system_result.code ~= 0 or system_result.stdout == nil or system_result.stdout == "" then
+  local system = M.current_system(root)
+  if system == nil then
     return nil
   end
-  local system = vim.trim(system_result.stdout)
 
   local outputs = {}
   for _, output_spec in ipairs(specs) do
@@ -85,7 +115,11 @@ function M.eval_outputs(root, specs)
         if #names > 0 then
           table.insert(outputs, { attr = output_spec.attr, names = names })
         end
+      else
+        log_failure(("eval_outputs %s.%s decode"):format(output_spec.attr, system), names_result)
       end
+    else
+      log_failure(("eval_outputs %s.%s"):format(output_spec.attr, system), names_result)
     end
   end
 
@@ -209,11 +243,13 @@ function M.detect_nix_unit_flake(root, test_names)
   local result = run(command, root)
 
   if result.code ~= 0 or result.stdout == nil or result.stdout == "" then
+    log_failure("detect_nix_unit_flake", result)
     return nil
   end
 
   local ok, names = pcall(vim.json.decode, result.stdout)
   if not ok or type(names) ~= "table" or #names == 0 then
+    log_failure("detect_nix_unit_flake decode", result)
     return nil
   end
 
@@ -264,11 +300,13 @@ in
 
   local result = run(command, root)
   if result.code ~= 0 or result.stdout == nil or result.stdout == "" then
+    log_failure(("nixpkgs_test_names %s"):format(attr), result)
     return nil
   end
 
   local ok, names = pcall(vim.json.decode, result.stdout)
   if not ok or type(names) ~= "table" or #names == 0 then
+    log_failure(("nixpkgs_test_names %s decode"):format(attr), result)
     return nil
   end
   return names
@@ -343,6 +381,7 @@ function M.merge_outputs(tree, system, outputs)
             range = { 0, 0, 0, 0 },
             runner = "nix",
             attr_path = attr_path,
+            attr_path_parts = { attr, system, name },
           },
         })
       end
@@ -353,7 +392,15 @@ function M.merge_outputs(tree, system, outputs)
       added = true
 
       local attr_node = find_namespace(list, attr)
+      if attr_node ~= nil then
+        attr_node[1].attr_path = attr
+        attr_node[1].attr_path_parts = { attr }
+      end
       local system_node = attr_node ~= nil and find_namespace(attr_node, system) or nil
+      if system_node ~= nil then
+        system_node[1].attr_path = ("%s.%s"):format(attr, system)
+        system_node[1].attr_path_parts = { attr, system }
+      end
 
       if system_node ~= nil then
         vim.list_extend(system_node, leaves)
@@ -365,6 +412,8 @@ function M.merge_outputs(tree, system, outputs)
             path = file_path,
             type = "namespace",
             range = { 0, 0, 0, 0 },
+            attr_path = ("%s.%s"):format(attr, system),
+            attr_path_parts = { attr, system },
           },
         }
         vim.list_extend(system_child, leaves)
@@ -379,6 +428,8 @@ function M.merge_outputs(tree, system, outputs)
               path = file_path,
               type = "namespace",
               range = { 0, 0, 0, 0 },
+              attr_path = attr,
+              attr_path_parts = { attr },
             },
             system_child,
           })

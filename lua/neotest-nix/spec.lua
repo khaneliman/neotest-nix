@@ -15,6 +15,7 @@ M.system_pattern = "^[a-z0-9_]+%-[a-z0-9_]+$"
 
 ---@class neotest-nix.Position : neotest.Position
 ---@field attr_path? string
+---@field attr_path_parts? string[]
 ---@field runner? "nix"|"nix-unit"
 ---@field nix_unit_kind? "flake"|"import"
 ---@field test_script_range? integer[]
@@ -22,6 +23,8 @@ M.system_pattern = "^[a-z0-9_]+%-[a-z0-9_]+$"
 ---@field nixpkgs_file_build? string Root-relative file built with `nix-build <file>`.
 ---@field nixpkgs_file_eval? string Root-relative file run with `nix-instantiate --eval`.
 ---@field nixpkgs_eval_test? string Single `lib.runTests` test name selected from a Nixpkgs eval file.
+---@field dynamic_system? boolean True when `attr_path` carries a literal `<system>`
+---placeholder resolved to the current system at run time.
 
 local nix_features = {
   "--extra-experimental-features",
@@ -59,13 +62,20 @@ local function position_path(tree)
   return positions
 end
 
+---@type fun(tree: neotest.Tree): string[]?
+local check_attr_parts
+
 ---@param tree neotest.Tree
----@return string?
-local function check_attr(tree)
+---@return string[]?
+function check_attr_parts(tree)
   local position = tree:data()
   ---@cast position neotest-nix.Position
+  if position.attr_path_parts ~= nil then
+    return vim.deepcopy(position.attr_path_parts)
+  end
+
   if position.attr_path ~= nil then
-    return position.attr_path
+    return vim.split(position.attr_path, ".", { plain = true })
   end
 
   local system
@@ -84,10 +94,10 @@ local function check_attr(tree)
   end
 
   if test == nil then
-    return ("checks.%s"):format(system)
+    return { "checks", system }
   end
 
-  return ("checks.%s.%s"):format(system, test)
+  return { "checks", system, test }
 end
 
 ---@param value string
@@ -96,16 +106,54 @@ local function nix_string(value)
   return eval.nix_string_literal(value)
 end
 
+-- A bare Nix identifier: safe to splice into an expression unquoted.
+local nix_identifier_pattern = "^[%a_][%w_'%-]*$"
+
+---Attribute segment for splicing into a Nix select path: bare identifiers stay
+---bare, anything else uses `${"..."}` string-key access.
+---@param segment string
+---@return string
+local function nix_attr_segment(segment)
+  if segment:match(nix_identifier_pattern) ~= nil then
+    return segment
+  end
+  return ("${%s}"):format(nix_string(segment))
+end
+
+---Attribute segment inside a flake installable (`.#checks."x y"`).
+---@param segment string
+---@return string
+local function installable_attr_segment(segment)
+  if segment:match(nix_identifier_pattern) ~= nil then
+    return segment
+  end
+  return nix_string(segment)
+end
+
+---@param segments string[]
+---@param render_segment fun(segment: string): string
+---@return string
+local function render_attr_path(segments, render_segment)
+  local rendered = {}
+  for index, segment in ipairs(segments) do
+    rendered[index] = render_segment(segment)
+  end
+  return table.concat(rendered, ".")
+end
+
 ---@param attr string
+---@param attr_parts string[]?
 ---@param kind "flake"|"import"
 ---@param path string
 ---@return string
-local function nix_unit_expr(attr, kind, path)
-  local name = attr:match("([^.]+)$") or "test"
+local function nix_unit_expr(attr, attr_parts, kind, path)
+  local segments = attr_parts or vim.split(attr, ".", { plain = true })
+  local name = segments[#segments] or "test"
   local root = kind == "import"
       and ("(import (builtins.path { path = %s; }))"):format(nix_string(path))
     or "(builtins.getFlake (toString ./. ))"
-  return ("{ %s = %s.%s; }"):format(name, root, attr)
+  local key = name:match(nix_identifier_pattern) ~= nil and name or nix_string(name)
+  return ("{ %s = %s.%s; }"):format(key, root, render_attr_path(segments, nix_attr_segment))
 end
 
 ---Expression that runs a single test out of a wrapped flake suite. The suite's
@@ -331,7 +379,13 @@ function M.build_spec(args, opts)
   if position.type == "dir" then
     return nil
   end
-  if position.type == "namespace" and position.name:match(M.system_pattern) ~= nil then
+  -- Source-parsed system namespaces are broken down into their child checks by
+  -- neotest; eval-discovered ones carry an attr_path and build that directly.
+  if
+    position.type == "namespace"
+    and position.attr_path == nil
+    and position.name:match(M.system_pattern) ~= nil
+  then
     return nil
   end
 
@@ -367,7 +421,31 @@ function M.build_spec(args, opts)
     return run_spec
   end
 
-  local attr = check_attr(tree)
+  local attr_parts = check_attr_parts(tree)
+  local attr = attr_parts ~= nil and table.concat(attr_parts, ".") or nil
+  if
+    attr_parts ~= nil
+    and attr ~= nil
+    and position.dynamic_system
+    and attr:find("<system>", 1, true) ~= nil
+  then
+    -- Positions under a runtime-generated per-system attrset carry a literal
+    -- `<system>` placeholder; substitute the current system at run time.
+    local system = eval.current_system(cwd)
+    if system == nil then
+      vim.notify(
+        ("neotest-nix: could not determine the current system to run %s"):format(attr),
+        vim.log.levels.WARN
+      )
+      return nil
+    end
+    for index, segment in ipairs(attr_parts) do
+      if segment == "<system>" then
+        attr_parts[index] = system
+      end
+    end
+    attr = table.concat(attr_parts, ".")
+  end
   local command
   local context_attr = attr
   -- Set when the run delegates to `nix-unit --flake`, so results parse the
@@ -433,8 +511,9 @@ function M.build_spec(args, opts)
     }
     vim.list_extend(command, nix_unit_features)
     table.insert(command, "--expr")
-    table.insert(command, nix_unit_expr(attr, position.nix_unit_kind, position.path))
+    table.insert(command, nix_unit_expr(attr, attr_parts, position.nix_unit_kind, position.path))
   else
+    ---@cast attr_parts string[]
     command = {
       "nix",
       "build",
@@ -443,7 +522,7 @@ function M.build_spec(args, opts)
     table.insert(command, "--keep-going")
     -- Do not lock the flake on disk just to run tests.
     table.insert(command, "--no-write-lock-file")
-    table.insert(command, ".#" .. attr)
+    table.insert(command, ".#" .. render_attr_path(attr_parts, installable_attr_segment))
   end
 
   local run_spec = {

@@ -83,6 +83,7 @@ describe("eval output merge", function()
     assert.is_not_nil(parse)
     assert.are.equal("nix", parse.runner)
     assert.are.equal("parseLix", parse.name)
+    assert.are.same({ "checks", "x86_64-linux", "parseLix" }, parse.attr_path_parts)
     assert.is_not_nil(tests["checks.x86_64-linux.treefmt"])
 
     -- positions are keyed by a file-qualified id (so sibling flake.nix files
@@ -96,12 +97,14 @@ describe("eval output merge", function()
     local namespaces = {}
     for _, position in merged:iter() do
       if position.type == "namespace" then
-        namespaces[position.name] = true
+        namespaces[position.name] = position
       end
     end
 
-    assert.is_true(namespaces["checks"])
-    assert.is_true(namespaces["x86_64-linux"])
+    assert.are.equal("checks", namespaces["checks"].attr_path)
+    assert.are.same({ "checks" }, namespaces["checks"].attr_path_parts)
+    assert.are.equal("checks.x86_64-linux", namespaces["x86_64-linux"].attr_path)
+    assert.are.same({ "checks", "x86_64-linux" }, namespaces["x86_64-linux"].attr_path_parts)
   end)
 
   it("merges multiple outputs under their own namespaces", function()
@@ -168,6 +171,15 @@ describe("eval output merge", function()
     local tests = tests_by_attr(merged)
     assert.is_not_nil(tests["checks.x86_64-linux.unit"])
     assert.is_not_nil(tests["checks.x86_64-linux.extra"])
+
+    local namespaces = {}
+    for _, position in merged:iter() do
+      if position.type == "namespace" then
+        namespaces[position.name] = position
+      end
+    end
+    assert.are.equal("checks", namespaces["checks"].attr_path)
+    assert.are.equal("checks.x86_64-linux", namespaces["x86_64-linux"].attr_path)
   end)
 
   it("qualifies injected ids by file so sibling flakes do not collide", function()
@@ -206,6 +218,24 @@ end)
 
 describe("eval_outputs", function()
   local eval = require("neotest-nix.eval")
+
+  local function capture_log()
+    local env = vim.env.NEOTEST_NIX_DEBUG
+    local stdpath = vim.fn.stdpath
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    vim.env.NEOTEST_NIX_DEBUG = "1"
+    vim.fn.stdpath = function()
+      return dir
+    end
+    package.loaded["neotest-nix.log"] = nil
+    finally(function()
+      vim.env.NEOTEST_NIX_DEBUG = env
+      vim.fn.stdpath = stdpath
+      package.loaded["neotest-nix.log"] = nil
+    end)
+    return vim.fs.joinpath(dir, "neotest-nix.log")
+  end
 
   ---Stub vim.system so the system probe and the attrNames eval return canned
   ---output; the callback fires synchronously so the nio future resolves at once.
@@ -254,6 +284,7 @@ describe("eval_outputs", function()
   end)
 
   it("returns nil when the current system cannot be determined", function()
+    local log_path = capture_log()
     local original = vim.system
     ---@diagnostic disable-next-line: duplicate-set-field
     vim.system = function(_, _, callback)
@@ -265,9 +296,11 @@ describe("eval_outputs", function()
     end)
 
     assert.is_nil(eval.eval_outputs(vim.fn.tempname()))
+    assert.is_truthy(table.concat(vim.fn.readfile(log_path), "\n"):find("current_system", 1, true))
   end)
 
   it("returns nil when the system probe cannot be spawned", function()
+    local log_path = capture_log()
     local original = vim.system
     ---@diagnostic disable-next-line: duplicate-set-field
     vim.system = function()
@@ -278,6 +311,26 @@ describe("eval_outputs", function()
     end)
 
     assert.is_nil(eval.eval_outputs(vim.fn.tempname()))
+    assert.is_truthy(table.concat(vim.fn.readfile(log_path), "\n"):find("ENOENT: nix", 1, true))
+  end)
+
+  it("caches the current system per root", function()
+    local original = vim.system
+    local calls = 0
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(_, _, callback)
+      calls = calls + 1
+      callback({ code = 0, stdout = "x86_64-linux\n", stderr = "" })
+      return {}
+    end
+    finally(function()
+      vim.system = original
+    end)
+
+    local root = vim.fn.tempname()
+    assert.are.equal("x86_64-linux", eval.current_system(root))
+    assert.are.equal("x86_64-linux", eval.current_system(root))
+    assert.are.equal(1, calls)
   end)
 end)
 
@@ -337,6 +390,23 @@ describe("nix-unit flake detection", function()
   end)
 
   it("returns nil when flake detection cannot spawn nix", function()
+    local log_path = (function()
+      local env = vim.env.NEOTEST_NIX_DEBUG
+      local stdpath = vim.fn.stdpath
+      local dir = vim.fn.tempname()
+      vim.fn.mkdir(dir, "p")
+      vim.env.NEOTEST_NIX_DEBUG = "1"
+      vim.fn.stdpath = function()
+        return dir
+      end
+      package.loaded["neotest-nix.log"] = nil
+      finally(function()
+        vim.env.NEOTEST_NIX_DEBUG = env
+        vim.fn.stdpath = stdpath
+        package.loaded["neotest-nix.log"] = nil
+      end)
+      return vim.fs.joinpath(dir, "neotest-nix.log")
+    end)()
     local original_system = vim.system
     ---@diagnostic disable-next-line: duplicate-set-field
     vim.system = function()
@@ -347,5 +417,8 @@ describe("nix-unit flake detection", function()
     end)
 
     assert.is_nil(eval.detect_nix_unit_flake(vim.fn.tempname(), { "testMissingNix" }))
+    assert.is_truthy(
+      table.concat(vim.fn.readfile(log_path), "\n"):find("detect_nix_unit_flake", 1, true)
+    )
   end)
 end)

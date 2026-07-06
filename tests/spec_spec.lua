@@ -1,4 +1,5 @@
 local spec = require("neotest-nix.spec")
+local eval = require("neotest-nix.eval")
 
 local Tree = {}
 Tree.__index = Tree
@@ -213,6 +214,79 @@ describe("spec", function()
     assert.are.equal(root, run.cwd)
     assert.are.equal("tests.testPass", run.context.attr)
     assert.are.equal("nix-unit", run.context.runner)
+  end)
+
+  it("quotes nix-unit attr segments that are not identifiers", function()
+    local root = project()
+    local test = node({
+      attr_path = "tests.test with spaces",
+      attr_path_parts = { "tests", "test with spaces" },
+      id = "test with spaces",
+      name = "test with spaces",
+      nix_unit_kind = "flake",
+      path = vim.fs.joinpath(root, "flake.nix"),
+      runner = "nix-unit",
+      type = "test",
+    })
+
+    local run = build_spec({ tree = test })
+
+    assert.same({
+      "nix-unit",
+      "--extra-experimental-features",
+      "flakes",
+      "--expr",
+      '{ "test with spaces" = (builtins.getFlake (toString ./. )).tests.${"test with spaces"}; }',
+    }, run.command)
+  end)
+
+  it("preserves dots inside structured nix-unit attr segments", function()
+    local root = project()
+    local test = node({
+      attr_path = "tests.1.0",
+      attr_path_parts = { "tests", "1.0" },
+      id = "1.0",
+      name = "1.0",
+      nix_unit_kind = "flake",
+      path = vim.fs.joinpath(root, "flake.nix"),
+      runner = "nix-unit",
+      type = "test",
+    })
+
+    local run = build_spec({ tree = test })
+
+    assert.same({
+      "nix-unit",
+      "--extra-experimental-features",
+      "flakes",
+      "--expr",
+      '{ "1.0" = (builtins.getFlake (toString ./. )).tests.${"1.0"}; }',
+    }, run.command)
+  end)
+
+  it("quotes flake check installable attr segments", function()
+    local root = project()
+    local test = node({
+      attr_path = "checks.x86_64-linux.integration test",
+      attr_path_parts = { "checks", "x86_64-linux", "integration test" },
+      id = "integration test",
+      name = "integration test",
+      path = vim.fs.joinpath(root, "flake.nix"),
+      runner = "nix",
+      type = "test",
+    })
+
+    local run = build_spec({ tree = test })
+
+    assert.same({
+      "nix",
+      "build",
+      "--extra-experimental-features",
+      "nix-command flakes",
+      "--keep-going",
+      "--no-write-lock-file",
+      '.#checks.x86_64-linux."integration test"',
+    }, run.command)
   end)
 
   it("builds an import expression for bare-attrset nix-unit files", function()
@@ -454,6 +528,43 @@ describe("spec", function()
     assert.are.equal(root, run.cwd)
     -- nix-build output streams through the shared nix error scanner.
     assert.is_function(run.stream)
+  end)
+
+  it("resolves dynamic system placeholders when building checks", function()
+    local current_system = eval.current_system
+    eval.current_system = function()
+      return "x86_64-linux"
+    end
+
+    local root = project()
+    local test = node({
+      attr_path = "checks.<system>.unit",
+      dynamic_system = true,
+      id = "unit",
+      name = "unit",
+      path = vim.fs.joinpath(root, "flake.nix"),
+      runner = "nix",
+      type = "test",
+    })
+
+    local ok, run = pcall(function()
+      return build_spec({ tree = test })
+    end)
+    eval.current_system = current_system
+    if not ok then
+      error(run)
+    end
+
+    assert.same({
+      "nix",
+      "build",
+      "--extra-experimental-features",
+      "nix-command flakes",
+      "--keep-going",
+      "--no-write-lock-file",
+      ".#checks.x86_64-linux.unit",
+    }, run.command)
+    assert.are.equal("checks.x86_64-linux.unit", run.context.attr)
   end)
 
   it("builds nix-build for a lib release file position", function()
