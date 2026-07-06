@@ -7,12 +7,15 @@
 A [Neotest](https://github.com/nvim-neotest/neotest) adapter for running Nix
 tests directly from Neovim.
 
-It discovers two kinds of tests in a flake-based project and runs them in place:
+It discovers three kinds of tests and runs them in place:
 
 - **Flake checks** — `checks.<system>.<name>` derivations, including NixOS VM
   tests with a `testScript`. Run with `nix`.
 - **nix-unit tests** — attribute sets shaped `{ expr = ...; expected = ...; }`
   (or `expectedError`). Run with [`nix-unit`](https://github.com/nix-community/nix-unit).
+- **Nixpkgs checkouts** — `pkgs/by-name` `passthru.tests`, `lib/tests`
+  eval and build tests, and `nixos/tests` VM tests. Run with legacy commands
+  (`nix-build`/`nix-instantiate`) that evaluate the working tree in place.
 
 ## Demo
 
@@ -25,7 +28,8 @@ It discovers two kinds of tests in a flake-based project and runs them in place:
 - Discovers flake `checks` and `nix-unit` suites straight from tree-sitter, so
   the test tree appears without evaluating the flake.
 - Runs the right tool per test — `nix build`/`nix flake check` for checks,
-  `nix-unit` for unit suites.
+  `nix-unit` for unit suites, and legacy `nix-build`/`nix-instantiate` for
+  Nixpkgs checkout tests.
 - Streams command output live and reports pass/fail per position.
 - Turns Nix evaluation/build errors into diagnostics at the originating source
   line, translating `/nix/store/...-source` paths back to your worktree.
@@ -160,15 +164,26 @@ require("neotest-nix")({
   -- relative to the flake root and matches the file or any directory above it.
   -- nix_unit_flakes = { { path = "lib/tests", flake = ".#tests" } },
   nix_unit_flakes = nil,
+
+  -- Auto-detect Nixpkgs checkouts and expose pkgs/by-name passthru.tests,
+  -- lib/tests, and nixos/tests through legacy commands. Set true to force or
+  -- false to disable.
+  nixpkgs_mode = nil,
+
+  -- If a by-name package has computed passthru.tests and no static names,
+  -- evaluate the package lazily to enumerate individual test attrs.
+  discover_nixpkgs_eval_tests = false,
 })
 ```
 
 | Option | Type | Default | Description |
-| ---------------------- | -------------------------- | -------------------- | ------------------------------------------------------------------------ |
+| ------------------------------- | -------------------------- | -------------------- | ------------------------------------------------------------------------ |
 | `parser_runtime_paths` | `string[]?` | `nil` | Extra runtimepath roots containing `parser/nix.so`. |
 | `discover_eval_checks` | `boolean?` | `false` | Evaluate the flake to discover outputs not present in the source. |
 | `eval_outputs` | `neotest-nix.EvalOutput[]?` | `{ { attr = "checks" } }` | Outputs to enumerate per system when `discover_eval_checks` is on. |
 | `nix_unit_flakes` | `neotest-nix.NixUnitFlake[]?` | `nil` | Map wrapped nix-unit files to a flake installable, overriding auto-detection. |
+| `nixpkgs_mode` | `boolean?` | `nil` | Auto-detect, force, or disable Nixpkgs-style legacy discovery. |
+| `discover_nixpkgs_eval_tests` | `boolean?` | `false` | Lazily evaluate computed by-name `passthru.tests` when static parsing finds none. |
 
 ## How discovery works
 
@@ -185,6 +200,16 @@ require("neotest-nix")({
   `discover_eval_checks` is enabled, flake outputs are additionally enumerated
   via `nix eval` and merged into the tree, so checks generated at evaluation
   time still show up.
+- Nixpkgs mode is auto-detected for trees shaped like Nixpkgs (`pkgs/by-name`,
+  `lib`, and `nixos` or `pkgs/top-level/all-packages.nix`). Set
+  `nixpkgs_mode = true` to force legacy discovery in a fork, or `false` to keep
+  plain flake behavior.
+- In Nixpkgs mode, `pkgs/by-name/<shard>/<name>/package.nix` exposes static
+  `passthru.tests` entries as child nodes and runs them with
+  `nix-build -A <name>.tests.<test>`. Computed test sets stay as a file node
+  unless `discover_nixpkgs_eval_tests` is enabled; that eval is lazy and cached.
+- `lib/tests` and `nixos/tests` files in a Nixpkgs checkout run through legacy
+  commands so they evaluate the working tree in place.
 
 ## Limitations
 
@@ -203,6 +228,31 @@ require("neotest-nix")({
   needs a committed `flake.lock` with every input locked; otherwise the run
   fails with `cannot update unlocked flake input`. Individual tests run via
   `--expr` and are unaffected.
+- Nixpkgs checkout discovery intentionally prunes most of `pkgs/`, `lib/`, and
+  `nixos/` outside supported test subtrees to keep the Neotest tree responsive.
+
+## Troubleshooting
+
+Run `:checkhealth neotest-nix` first; it checks the parser and external tools.
+
+For discovery or run-spec debugging, enable the adapter log before loading
+Neotest:
+
+```lua
+vim.g.neotest_nix_debug = true
+```
+
+Or from the shell:
+
+```sh
+NEOTEST_NIX_DEBUG=1 nvim
+```
+
+The log is written to:
+
+```lua
+vim.fn.stdpath("log") .. "/neotest-nix.log"
+```
 
 ## Contributing
 
