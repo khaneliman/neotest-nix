@@ -224,6 +224,24 @@ describe("results", function()
     assert.is_truthy(result.short:find("testFoo", 1, true))
   end)
 
+  it("parses pretty nix-eval failure lists", function()
+    local root = project()
+    local position_tree = tree(root)
+    local parsed = results.results(run_spec(root, { runner = "nix-eval" }), {
+      code = 0,
+      output = output_file({
+        "evaluation warning: noisy stderr",
+        "[",
+        '  { "name": "testFoo", "expected": 1, "result": 2 }',
+        "]",
+      }),
+    }, position_tree)
+
+    local result = parsed[position_tree:data().id]
+    assert.are.equal("failed", result.status)
+    assert.is_truthy(result.short:find("testFoo", 1, true))
+  end)
+
   it("maps nix-eval failure lists onto child test positions", function()
     local root = project()
     local path = vim.fs.joinpath(root, "lib", "tests", "misc.nix")
@@ -533,6 +551,26 @@ describe("results", function()
     )
 
     assert.are.equal("assertion failed", errors[1].message)
+  end)
+
+  it("parses error frame paths that contain colons", function()
+    local root = project()
+    local dir = vim.fs.joinpath(root, "checks", "with:colon")
+    vim.fn.mkdir(dir, "p")
+    local file = vim.fs.joinpath(dir, "unit.nix")
+    vim.fn.writefile({ "first", "second" }, file)
+
+    local errors = results.parse_errors(
+      table.concat({
+        "error: assertion failed",
+        "       at /nix/store/abc123-source/checks/with:colon/unit.nix:2:3:",
+      }, "\n"),
+      root
+    )
+
+    assert.are.equal(file, errors[1].path)
+    assert.are.equal(1, errors[1].line)
+    assert.are.equal(2, errors[1].column)
   end)
 
   it("ignores malformed error frames without a usable location", function()

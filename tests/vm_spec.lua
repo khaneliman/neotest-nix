@@ -29,6 +29,22 @@ describe("vm", function()
     }, tracebacks)
   end)
 
+  it("parses bare Python traceback messages", function()
+    local tracebacks = vm.parse_python_tracebacks(table.concat({
+      "Traceback (most recent call last):",
+      '  File "/nix/store/hash-source/test-script.py", line 4, in <module>',
+      '    machine.succeed("false")',
+      "KeyError",
+    }, "\n"))
+
+    assert.are.same({
+      {
+        line = 4,
+        message = "KeyError",
+      },
+    }, tracebacks)
+  end)
+
   it("maps Python traceback lines into testScript ranges", function()
     assert.are.equal(12, vm.test_script_line(position({ 9, 17, 13, 6 }), 3))
   end)

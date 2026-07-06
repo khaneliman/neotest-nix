@@ -18,7 +18,7 @@ end
 ---@param store_path string
 ---@return string?
 local function source_relative_path(store_path)
-  return store_path:match("^/nix/store/[^/]+%-source/(.+)$")
+  return store_path:match("^/nix/store/[^/]+/(.+)$")
 end
 
 ---@param path string
@@ -53,6 +53,17 @@ local function strip_store_path_wrappers(value)
   if suffix ~= nil then
     unwrapped = unwrapped:sub(1, #unwrapped - #suffix)
   end
+  local quoted_location = unwrapped:match("([\"']:%d+:%d+)$")
+  if quoted_location ~= nil then
+    unwrapped = unwrapped:sub(1, #unwrapped - #quoted_location)
+    suffix = quoted_location .. (suffix or "")
+  else
+    local location = unwrapped:match("(:%d+:%d+)$")
+    if location ~= nil then
+      unwrapped = unwrapped:sub(1, #unwrapped - #location)
+      suffix = location .. (suffix or "")
+    end
+  end
 
   return unwrapped, prefix or "", suffix or ""
 end
@@ -61,7 +72,7 @@ end
 ---@param root string
 ---@return string
 function M.translate_string(value, root)
-  local translated = value:gsub("/nix/store/[^%s:]+%-source/[^%s:]+", function(store_path)
+  local translated = value:gsub("/nix/store/[^%s]+", function(store_path)
     local unwrapped_path, prefix, suffix = strip_store_path_wrappers(store_path)
     local translated_path = M.translate_store_path(unwrapped_path, root)
     if translated_path == unwrapped_path then

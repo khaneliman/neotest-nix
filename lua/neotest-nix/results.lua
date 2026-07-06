@@ -123,7 +123,7 @@ function M.parse_errors(output, root)
       current_message = parsed
     end
 
-    local path, row, column = line:match("^%s*at%s+([^:\n]+):(%d+):(%d+):")
+    local path, row, column = line:match("^%s*at%s+(.+):(%d+):(%d+):")
     if path ~= nil then
       local translated = local_error_path(path, root)
       if translated ~= nil then
@@ -550,6 +550,57 @@ local function write_output(text)
   return path
 end
 
+---@param text string
+---@return table?
+local function decode_last_json_array(text)
+  local last
+  local len = #text
+  local start = 1
+
+  while start <= len do
+    local open = text:find("%[", start)
+    if open == nil then
+      break
+    end
+
+    local depth = 0
+    local in_string = false
+    local escaped = false
+    for index = open, len do
+      local char = text:sub(index, index)
+      if in_string then
+        if escaped then
+          escaped = false
+        elseif char == "\\" then
+          escaped = true
+        elseif char == '"' then
+          in_string = false
+        end
+      elseif char == '"' then
+        in_string = true
+      elseif char == "[" then
+        depth = depth + 1
+      elseif char == "]" then
+        depth = depth - 1
+        if depth == 0 then
+          local ok, decoded = pcall(vim.json.decode, text:sub(open, index))
+          if ok and type(decoded) == "table" then
+            last = decoded
+          end
+          start = index + 1
+          break
+        end
+      end
+    end
+
+    if start <= open then
+      start = open + 1
+    end
+  end
+
+  return last
+end
+
 ---Build results for a legacy eval run (lib/tests/misc.nix), whose output is a
 ---`lib.runTests` failure list: `[]` means every test passed, otherwise each
 ---entry names a failing test. The JSON is extracted from the merged
@@ -567,21 +618,7 @@ local function nix_eval_results(tree, output, code)
   local id = tree:data().id
   local clean = strip_ansi(output)
 
-  -- The result JSON is printed last, but `evaluation warning:` lines (from
-  -- stderr, merged into this output) can precede it. Scan lines from the end
-  -- for the first that decodes to a list.
-  local value
-  local lines = vim.split(clean, "\n", { plain = true })
-  for index = #lines, 1, -1 do
-    local line = vim.trim(lines[index])
-    if line ~= "" then
-      local ok, decoded = pcall(vim.json.decode, line)
-      if ok and type(decoded) == "table" then
-        value = decoded
-        break
-      end
-    end
-  end
+  local value = decode_last_json_array(clean)
 
   -- A trimmed copy of the eval output, so the box's last line is the result
   -- (`[]` or the failure list) rather than the trailing blank Nix prints.

@@ -25,17 +25,31 @@ describe("paths", function()
     assert.are.equal(store_path, paths.translate_store_path(store_path, root))
   end)
 
-  it("leaves non-source paths unchanged", function()
+  it("translates non-source store paths to local files", function()
     local root = project()
     local store_path = "/nix/store/abc123-neotest-nix/checks/unit.nix"
 
-    assert.are.equal(store_path, paths.translate_store_path(store_path, root))
+    assert.are.equal(
+      vim.fs.joinpath(root, "checks", "unit.nix"),
+      paths.translate_store_path(store_path, root)
+    )
   end)
 
   it("translates store paths embedded in output strings", function()
     local root = project()
     local local_path = vim.fs.joinpath(root, "checks", "unit.nix")
     local output = "error: " .. "/nix/store/abc123-source/checks/unit.nix:2:3: failed"
+
+    assert.are.equal(
+      "error: " .. local_path .. ":2:3: failed",
+      paths.translate_string(output, root)
+    )
+  end)
+
+  it("translates store paths with line and column suffixes", function()
+    local root = project()
+    local local_path = vim.fs.joinpath(root, "checks", "unit.nix")
+    local output = "error: " .. "/nix/store/abc123-neotest-nix/checks/unit.nix:2:3: failed"
 
     assert.are.equal(
       "error: " .. local_path .. ":2:3: failed",

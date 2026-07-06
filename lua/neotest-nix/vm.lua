@@ -15,7 +15,7 @@ function M.parse_python_tracebacks(output)
     if parsed_line ~= nil then
       pending_line = tonumber(parsed_line)
     elseif pending_line ~= nil then
-      local message = line:match("^%s*([%w_%.]+:.*)$")
+      local message = line:match("^%s*([%w_%.]+:%s*.*)$") or line:match("^%s*([%w_%.]+)%s*$")
       if message ~= nil then
         table.insert(tracebacks, {
           line = pending_line,
