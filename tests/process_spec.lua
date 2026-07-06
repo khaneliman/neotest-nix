@@ -36,6 +36,50 @@ describe("process", function()
     assert.is_true(done)
   end)
 
+  it("streams every chunk from a process that exits immediately after emitting", function()
+    local done = false
+    local failed
+    local line_count = 200
+
+    nio.run(function()
+      local proc = process.strategy({
+        command = {
+          "sh",
+          "-c",
+          ("i=1; while [ $i -le %d ]; do echo line$i; i=$((i+1)); done"):format(line_count),
+        },
+      })
+      local stream = proc.output_stream()
+      local chunks = {}
+      local chunk = stream()
+      while chunk ~= nil do
+        chunks[#chunks + 1] = chunk
+        chunk = stream()
+      end
+      local code = proc.result()
+
+      local ok, err = pcall(function()
+        assert.are.equal(0, code)
+        local streamed = table.concat(chunks)
+        local seen = 0
+        for _ in streamed:gmatch("line%d+\n") do
+          seen = seen + 1
+        end
+        assert.are.equal(line_count, seen)
+        assert.is_nil(stream())
+        assert.is_true(proc.is_complete())
+      end)
+      failed = not ok and err or nil
+      done = true
+    end)
+
+    vim.wait(2000, function()
+      return done
+    end)
+    assert.is_nil(failed)
+    assert.is_true(done)
+  end)
+
   it("reports spawn failures as failed process output", function()
     local done = false
     local failed

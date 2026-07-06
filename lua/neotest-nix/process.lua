@@ -59,6 +59,9 @@ function M.strategy(spec)
   local finish = nio.control.future()
   local output_finish = nio.control.future()
   local output_queue = nio.control.queue()
+  -- Unique end-of-stream marker; pushed after the final chunk so stream
+  -- consumers never race process completion against a pending queue get.
+  local output_sentinel = {}
   local result_code
 
   -- Hold a single handle for the process lifetime; flush per chunk so the
@@ -83,6 +86,7 @@ function M.strategy(spec)
     end
     if not output_finish.is_set() then
       output_finish.set()
+      output_queue.put_nowait(output_sentinel)
     end
     finish.set()
   end
@@ -113,15 +117,21 @@ function M.strategy(spec)
       return output_path
     end,
     output_stream = function()
+      local finished = false
       return function()
-        local data = nio.first({ output_queue.get, output_finish.wait })
-        if data ~= nil then
-          return data
+        if finished then
+          return nil
         end
 
-        if output_queue.size() ~= 0 then
-          return output_queue.get()
+        local data = output_queue.get()
+        if data == output_sentinel then
+          finished = true
+          -- Re-queue the sentinel so any other stream iterator terminates too.
+          output_queue.put_nowait(output_sentinel)
+          return nil
         end
+
+        return data
       end
     end,
     result = function()
