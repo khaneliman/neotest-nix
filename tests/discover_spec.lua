@@ -160,6 +160,25 @@ describe("discover", function()
     assert.is_false(discover.is_test_file(vim.fs.joinpath(tmp, "escaped-interpolation_test.nix")))
   end)
 
+  it("keeps code inside string interpolation while stripping nested strings", function()
+    local nested_string_keywords = {
+      "{",
+      '  fixture = "prefix ${let x = "expr = 1; expected = 1;"; in x} suffix";',
+      "}",
+    }
+    local interpolated_assertion = {
+      "{",
+      '  fixture = "prefix ${ { testInterpolated = { expr = 1; expected = 1; }; } } suffix";',
+      "}",
+    }
+
+    write_file(vim.fs.joinpath(tmp, "nested-string_test.nix"), nested_string_keywords)
+    write_file(vim.fs.joinpath(tmp, "interpolated-assertion_test.nix"), interpolated_assertion)
+
+    assert.is_false(discover.is_test_file(vim.fs.joinpath(tmp, "nested-string_test.nix")))
+    assert.is_true(discover.is_test_file(vim.fs.joinpath(tmp, "interpolated-assertion_test.nix")))
+  end)
+
   it("filters store, git, and build output directories", function()
     assert.is_false(discover.filter_dir(".git", ".git", tmp))
     assert.is_false(discover.filter_dir("result", "result", tmp))

@@ -34,12 +34,31 @@ local function is_absolute_path(path)
   return path:match("^/") ~= nil or path:match("^[A-Za-z]:[/\\]") ~= nil
 end
 
+---Strip comments and string contents from Nix source, preserving code layout.
+---Interpolations (`${...}`) contain code and are kept: inside them the scanner
+---returns to code mode, tracking brace depth so strings nested in
+---interpolations nested in strings stay in sync (`"a ${b "c"} d"`).
 ---@param content string
 ---@return string
 local function strip_nix_comments_and_strings(content)
   local out = {}
   local i = 1
   local len = #content
+
+  -- Scanner mode: "code" (top level or inside `${...}`), '"' (double-quoted
+  -- string) or "''" (indented string). Strings and interpolations strictly
+  -- alternate, so the enclosing contexts live on two stacks: entering a string
+  -- saves the current interpolation brace depth, entering an interpolation
+  -- saves the enclosing string mode. In code mode we are inside an
+  -- interpolation exactly when `interp_top > 0`.
+  local mode = "code"
+  local depth = 0
+  ---@type string[]
+  local interp_modes = {}
+  local interp_top = 0
+  ---@type integer[]
+  local string_depths = {}
+  local string_top = 0
 
   local function append_space(count)
     for _ = 1, count do
@@ -49,74 +68,135 @@ local function strip_nix_comments_and_strings(content)
 
   while i <= len do
     local char = content:sub(i, i)
-    local next_two = content:sub(i, i + 1)
 
-    if char == "#" then
-      append_space(1)
-      i = i + 1
-      while i <= len and content:sub(i, i) ~= "\n" do
+    if mode == "code" then
+      local next_two = content:sub(i, i + 1)
+
+      if char == "#" then
         append_space(1)
         i = i + 1
-      end
-      if i <= len then
-        append_space(1)
-        i = i + 1
-      end
-    elseif next_two == "/*" then
-      append_space(2)
-      i = i + 2
-      while i <= len and content:sub(i, i + 1) ~= "*/" do
-        append_space(1)
-        i = i + 1
-      end
-      if i <= len then
+        while i <= len and content:sub(i, i) ~= "\n" do
+          append_space(1)
+          i = i + 1
+        end
+        if i <= len then
+          append_space(1)
+          i = i + 1
+        end
+      elseif next_two == "/*" then
         append_space(2)
         i = i + 2
-      end
-    elseif char == '"' then
-      append_space(1)
-      i = i + 1
-      while i <= len do
-        local quoted = content:sub(i, i)
-        if quoted == "\\" then
-          if i < len then
-            append_space(2)
-            i = i + 2
-          else
-            append_space(1)
-            i = i + 1
-          end
-        elseif quoted == '"' then
+        while i <= len and content:sub(i, i + 1) ~= "*/" do
           append_space(1)
           i = i + 1
-          break
+        end
+        if i <= len then
+          append_space(2)
+          i = i + 2
+        end
+      elseif char == '"' then
+        string_top = string_top + 1
+        string_depths[string_top] = depth
+        mode = '"'
+        append_space(1)
+        i = i + 1
+      elseif next_two == "''" then
+        string_top = string_top + 1
+        string_depths[string_top] = depth
+        mode = "''"
+        append_space(2)
+        i = i + 2
+      elseif interp_top > 0 and char == "{" then
+        depth = depth + 1
+        out[#out + 1] = char
+        i = i + 1
+      elseif interp_top > 0 and char == "}" then
+        if depth == 0 then
+          -- Closes the interpolation: resume the enclosing string.
+          mode = interp_modes[interp_top]
+          interp_top = interp_top - 1
+          append_space(1)
+        else
+          depth = depth - 1
+          out[#out + 1] = char
+        end
+        i = i + 1
+      else
+        out[#out + 1] = char
+        i = i + 1
+      end
+    elseif mode == '"' then
+      if char == "\\" then
+        -- `\"`, `\${`, `\\`: the next character is literal.
+        if i < len then
+          append_space(2)
+          i = i + 2
         else
           append_space(1)
           i = i + 1
         end
-      end
-    elseif next_two == "''" then
-      append_space(2)
-      i = i + 2
-      while i <= len do
-        if content:sub(i, i + 1) == "''" then
-          local escaped = content:sub(i + 2, i + 2)
-          if escaped == "'" or escaped == "$" then
-            append_space(3)
-            i = i + 3
-          else
-            append_space(2)
-            i = i + 2
-            break
-          end
+      elseif char == "$" then
+        local following = content:sub(i + 1, i + 1)
+        if following == "{" then
+          interp_top = interp_top + 1
+          interp_modes[interp_top] = mode
+          mode = "code"
+          depth = 0
+          append_space(2)
+          i = i + 2
+        elseif following == "$" then
+          -- `$$` is a literal dollar, not interpolation.
+          append_space(2)
+          i = i + 2
         else
           append_space(1)
           i = i + 1
         end
+      elseif char == '"' then
+        depth = string_depths[string_top]
+        string_top = string_top - 1
+        mode = "code"
+        append_space(1)
+        i = i + 1
+      else
+        append_space(1)
+        i = i + 1
       end
-    else
-      out[#out + 1] = char
-      i = i + 1
+    else -- mode == "''"
+      if char == "'" and content:sub(i + 1, i + 1) == "'" then
+        local escaped = content:sub(i + 2, i + 2)
+        if escaped == "'" or escaped == "$" then
+          -- `'''` and `''$` (as in `''${`) are literal escapes.
+          append_space(3)
+          i = i + 3
+        else
+          depth = string_depths[string_top]
+          string_top = string_top - 1
+          mode = "code"
+          append_space(2)
+          i = i + 2
+        end
+      elseif char == "$" then
+        local following = content:sub(i + 1, i + 1)
+        if following == "{" then
+          interp_top = interp_top + 1
+          interp_modes[interp_top] = mode
+          mode = "code"
+          depth = 0
+          append_space(2)
+          i = i + 2
+        elseif following == "$" then
+          -- `$$` is a literal dollar, not interpolation.
+          append_space(2)
+          i = i + 2
+        else
+          append_space(1)
+          i = i + 1
+        end
+      else
+        append_space(1)
+        i = i + 1
+      end
     end
   end
 
