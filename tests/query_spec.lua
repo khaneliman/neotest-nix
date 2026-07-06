@@ -49,6 +49,16 @@ local function names_by_type(positions, node_type)
   return names
 end
 
+local function positions_named(positions, name)
+  local matches = {}
+  for _, position in ipairs(positions) do
+    if position.name == name then
+      table.insert(matches, position)
+    end
+  end
+  return matches
+end
+
 describe("nix query", function()
   it("discovers flake checks without treating unrelated attrs as tests", function()
     local positions = parse_fixture()
@@ -135,6 +145,95 @@ describe("nix query", function()
     assert.are.equal("namespace", system.type)
     assert.are.equal("test", unit.type)
     assert.are.equal("checks.x86_64-linux.unit", unit.attr_path)
+  end)
+
+  it("emits one position for each dotted check binding", function()
+    local positions = parse_source(
+      table.concat({
+        "{",
+        "  outputs = { self }: {",
+        "    checks.x86_64-linux.unit = true;",
+        "  };",
+        "}",
+      }, "\n"),
+      "flake.nix"
+    )
+
+    local units = positions_named(positions, "unit")
+    assert.are.equal(1, #units)
+    assert.are.equal("checks.x86_64-linux.unit", units[1].attr_path)
+  end)
+
+  it("discovers quoted check names", function()
+    local positions = parse_source(
+      table.concat({
+        "{",
+        "  outputs = { self }: {",
+        '    checks.x86_64-linux."integration test" = true;',
+        "  };",
+        "}",
+      }, "\n"),
+      "flake.nix"
+    )
+
+    local position = find_position(positions, "integration test")
+    assert.is_not_nil(position)
+    assert.are.equal("nix", position.runner)
+    assert.are.equal("checks.x86_64-linux.integration test", position.attr_path)
+    assert.are.same({ "checks", "x86_64-linux", "integration test" }, position.attr_path_parts)
+  end)
+
+  it("preserves quoted attr segment boundaries", function()
+    local positions = parse_source(
+      table.concat({
+        "{",
+        "  outputs = { self }: {",
+        '    checks.x86_64-linux."1.0" = true;',
+        "  };",
+        "}",
+      }, "\n"),
+      "flake.nix"
+    )
+
+    local position = find_position(positions, "1.0")
+    assert.is_not_nil(position)
+    assert.are.equal("checks.x86_64-linux.1.0", position.attr_path)
+    assert.are.same({ "checks", "x86_64-linux", "1.0" }, position.attr_path_parts)
+  end)
+
+  it("marks checks under dynamic system attrs for runtime resolution", function()
+    local positions = parse_source(
+      table.concat({
+        "{",
+        "  outputs = { self, nixpkgs }: {",
+        "    checks.${nixpkgs.system}.unit = true;",
+        "  };",
+        "}",
+      }, "\n"),
+      "flake.nix"
+    )
+
+    local position = find_position(positions, "unit")
+    assert.is_not_nil(position)
+    assert.are.equal("checks.<system>.unit", position.attr_path)
+    assert.is_true(position.dynamic_system)
+  end)
+
+  it("skips checks with dynamic test names", function()
+    local positions = parse_source(
+      table.concat({
+        "{",
+        "  outputs = { self, system, name }: {",
+        "    checks.${system}.${name} = true;",
+        "  };",
+        "}",
+      }, "\n"),
+      "flake.nix"
+    )
+
+    for _, position in ipairs(positions) do
+      assert.is_not.equal("test", position.type)
+    end
   end)
 
   it("marks flake.nix nix-unit suites as flake-reachable", function()

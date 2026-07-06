@@ -29,7 +29,15 @@
   ] @namespace.definition
   (#match? @namespace.name "^[a-z0-9_]+-[a-z0-9_]+$"))
 
+; Anchor to the first attrpath component so a dotted binding like
+; `checks.x86_64-linux.foo = ...` yields exactly one match; Lua derives the
+; full name from the binding. Quoted names (`"my check" = ...`) match via
+; string_expression and are decoded (or rejected) in Lua.
 (binding
   attrpath: (attrpath
-    (identifier) @test.name)
+    .
+    [
+      (identifier)
+      (string_expression)
+    ] @test.name)
   expression: (_) @test.definition)

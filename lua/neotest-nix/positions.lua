@@ -25,6 +25,29 @@ function M.query()
   return cached_query
 end
 
+-- Sentinel for attrpath components whose value is only known at eval time
+-- (`${...}` interpolation, or quoted names embedding one). The NUL byte keeps
+-- it distinct from any legal Nix attribute name.
+local INTERPOLATION_PART = "\0interpolation"
+
+---Decode a quoted attrpath component (mirrors `binding_name` in nixpkgs.lua):
+---plain strings decode via vim.json, names embedding interpolation are
+---dynamic and collapse to the sentinel.
+---@param node TSNode
+---@param source string
+---@return string
+local function string_part(node, source)
+  local text = vim.treesitter.get_node_text(node, source)
+  if text:find("${", 1, true) == nil then
+    local ok, decoded = pcall(vim.json.decode, text)
+    if ok and type(decoded) == "string" then
+      return decoded
+    end
+  end
+
+  return INTERPOLATION_PART
+end
+
 ---@param node TSNode
 ---@param source string
 ---@return string[]
@@ -32,8 +55,13 @@ local function attrpath_parts(node, source)
   local parts = {}
 
   for child in node:iter_children() do
-    if child:type() == "identifier" then
+    local kind = child:type()
+    if kind == "identifier" then
       table.insert(parts, vim.treesitter.get_node_text(child, source))
+    elseif kind == "string_expression" then
+      table.insert(parts, string_part(child, source))
+    elseif kind == "interpolation" then
+      table.insert(parts, INTERPOLATION_PART)
     end
   end
 
@@ -108,6 +136,15 @@ end
 ---@return boolean
 local function is_dotted_check(parts)
   return #parts == 3 and parts[1] == "checks" and parts[2]:match(system_pattern) ~= nil
+end
+
+---@param parts string[]
+---@return boolean
+local function is_dynamic_system_check(parts)
+  return #parts == 3
+    and parts[1] == "checks"
+    and parts[2] == INTERPOLATION_PART
+    and parts[3] ~= INTERPOLATION_PART
 end
 
 ---@param parts string[]
@@ -320,15 +357,21 @@ function M.build_position(file_path, source, captured_nodes)
   end
 
   local parts = full_attrpath_parts(binding, source)
-  local is_check = is_dotted_check(parts)
+  local dynamic_system = is_dynamic_system_check(parts)
+  local is_check = is_dotted_check(parts) or dynamic_system
   local is_nix_unit = is_nix_unit_test(parts) and is_nix_unit_value(binding, source)
   if not is_check and not is_nix_unit then
     return nil
   end
 
+  if dynamic_system then
+    parts[2] = "<system>"
+  end
+
   local definition = captured_nodes["test.definition"]
   local position = {
     attr_path = table.concat(parts, "."),
+    attr_path_parts = vim.deepcopy(parts),
     type = "test",
     path = file_path,
     name = parts[#parts],
@@ -337,6 +380,7 @@ function M.build_position(file_path, source, captured_nodes)
   }
 
   if is_check then
+    position.dynamic_system = dynamic_system or nil
     position.test_script_range = test_script_range(binding, source)
   elseif is_nix_unit then
     position.nix_unit_kind = nix_unit_kind(binding, file_path)
