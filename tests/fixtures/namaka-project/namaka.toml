@@ -1,0 +1,6 @@
+[check]
+cmd = [
+  "sh",
+  "-c",
+  "printf '%s\n' 'trace: namaka={\"dir\":\".\",\"results\":{\"basic\":true}}' >&2",
+]
