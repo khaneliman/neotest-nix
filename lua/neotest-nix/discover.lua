@@ -203,10 +203,23 @@ local function strip_nix_comments_and_strings(content)
   return table.concat(out)
 end
 
----@param dir string
+---@param start string
+---@param marker string
+---@param marker_type "file"|"directory"
 ---@return string?
-function M.root(dir)
-  local normalized = vim.fs.normalize(dir)
+local function marker_dir(start, marker, marker_type)
+  local found = vim.fs.find(marker, {
+    path = start,
+    upward = true,
+    type = marker_type,
+  })[1]
+
+  return found ~= nil and vim.fs.dirname(found) or nil
+end
+
+---@param normalized string
+---@return string?
+local function existing_start(normalized)
   local start
   if path_exists(normalized) then
     start = normalized
@@ -239,34 +252,90 @@ function M.root(dir)
     start = dirname(start)
   end
 
-  local marker = vim.fs.find("flake.nix", {
-    path = start,
-    upward = true,
-    type = "file",
-  })[1]
+  return start
+end
 
-  if marker == nil then
-    return nil
+---@param start string
+---@return string?
+local function flake_root(start)
+  return marker_dir(start, "flake.nix", "file")
+end
+
+---@type fun(file_path: string): boolean
+local has_nix_unit_assertion
+
+---@param file_path string
+---@return boolean
+local function recognized_non_flake_test_file(file_path)
+  if file_path:sub(-4) ~= ".nix" then
+    return false
   end
 
-  local flake_dir = vim.fs.dirname(marker)
+  local filename = file_path:match("[^/\\]+$") or file_path
+  if filename == "flake.nix" then
+    return false
+  end
+
+  local test_named = false
+  if file_path:find("[tT][eE][sS][tT]") ~= nil then
+    test_named = filename:find("[tT][eE][sS][tT]") ~= nil
+    if not test_named then
+      local parent = file_path:match("([^/\\]+)[/\\][^/\\]+$")
+      test_named = parent ~= nil and parent:find("[tT][eE][sS][tT]") ~= nil
+    end
+  end
+
+  if not test_named then
+    return false
+  end
+
+  return has_nix_unit_assertion(file_path)
+    or require("neotest-nix.runtests").is_runtests_file(file_path)
+end
+
+---@param dir string
+---@param opts neotest-nix.Config?
+---@return string?
+function M.root(dir, opts)
+  opts = opts or {}
+  local normalized = vim.fs.normalize(dir)
+  local start = existing_start(normalized)
+  if start == nil then
+    return nil
+  end
 
   -- Nixpkgs ships nested sub-flakes (e.g. `lib/flake.nix`). Walking up to the
   -- nearest `flake.nix` would root files under `lib/` at that sub-flake,
   -- fragmenting the tree into a second adapter root. When the resolved flake
   -- sits inside a Nixpkgs checkout, prefer the Nixpkgs top so the whole tree
   -- shares one root.
-  local nixpkgs_root = require("neotest-nix.nixpkgs").detect_root(flake_dir)
+  local nixpkgs_root = opts.nixpkgs_mode ~= false
+      and require("neotest-nix.nixpkgs").detect_root(start)
+    or nil
   if nixpkgs_root ~= nil then
     return nixpkgs_root
   end
 
-  return flake_dir
+  local flake_dir = flake_root(start)
+  if flake_dir ~= nil then
+    return flake_dir
+  end
+
+  if opts.non_flake_roots == false then
+    return nil
+  end
+
+  if recognized_non_flake_test_file(normalized) then
+    local git_root = marker_dir(start, ".git", "directory")
+    return git_root or vim.fs.dirname(normalized)
+  end
+
+  return nil
 end
 
 ---@param file_path string
 ---@return boolean
-local function has_nix_unit_assertion(file_path)
+has_nix_unit_assertion = function(file_path)
   local stat = uv.fs_stat(file_path)
   if stat == nil or stat.type ~= "file" then
     return false
@@ -370,6 +439,7 @@ end
 ---@param opts neotest-nix.Config?
 ---@return boolean
 function M.is_test_file(file_path, opts)
+  opts = opts or {}
   if file_path:sub(-4) ~= ".nix" then
     return false
   end
@@ -383,6 +453,9 @@ function M.is_test_file(file_path, opts)
     local nixpkgs = require("neotest-nix.nixpkgs")
     return nixpkgs.resolve_root(file_path, opts) == nil
   end
+
+  local start = existing_start(vim.fs.normalize(file_path))
+  local has_flake = start ~= nil and flake_root(start) ~= nil
 
   -- A file qualifies as test-named when either the file itself or its
   -- immediate parent directory is test-named (e.g. `tests/default.nix`).
@@ -422,6 +495,10 @@ function M.is_test_file(file_path, opts)
 
   -- Generic nix-unit discovery (non-Nixpkgs projects).
   if not test_named then
+    return false
+  end
+
+  if opts.non_flake_roots == false and not has_flake then
     return false
   end
 

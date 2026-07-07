@@ -26,6 +26,37 @@ describe("discover", function()
     assert.are.equal(project, discover.root(vim.fs.joinpath(nested, "example_test.nix")))
   end)
 
+  it("roots non-flake test files at the nearest git root by default", function()
+    local project = vim.fs.joinpath(tmp, "project")
+    local tests = vim.fs.joinpath(project, "tests")
+    mkdir(vim.fs.joinpath(project, ".git"))
+    mkdir(tests)
+    local path = vim.fs.joinpath(tests, "default.nix")
+    write_file(path, { "{", "  testFoo = { expr = 1; expected = 1; };", "}" })
+
+    assert.are.equal(project, discover.root(path))
+    assert.is_true(discover.is_test_file(path))
+  end)
+
+  it("falls back to the file parent for recognized non-flake tests without git", function()
+    local tests = vim.fs.joinpath(tmp, "tests")
+    mkdir(tests)
+    local path = vim.fs.joinpath(tests, "default.nix")
+    write_file(path, { "{", "  testFoo = { expr = 1; expected = 1; };", "}" })
+
+    assert.are.equal(tests, discover.root(path))
+  end)
+
+  it("keeps flake-only behavior when non_flake_roots is false", function()
+    local tests = vim.fs.joinpath(tmp, "tests")
+    mkdir(tests)
+    local path = vim.fs.joinpath(tests, "default.nix")
+    write_file(path, { "{", "  testFoo = { expr = 1; expected = 1; };", "}" })
+
+    assert.is_nil(discover.root(path, { non_flake_roots = false }))
+    assert.is_false(discover.is_test_file(path, { non_flake_roots = false }))
+  end)
+
   it("returns nil for missing relative paths instead of falling back to cwd", function()
     local cwd = vim.fn.getcwd()
     vim.fn.chdir(tmp)

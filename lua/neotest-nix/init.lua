@@ -18,8 +18,13 @@ local M = {}
 M._opts = {}
 
 M.name = "neotest-nix"
-M.root = discover.root
 M.results = results.results
+
+---@param dir string
+---@return string?
+function M.root(dir)
+  return discover.root(dir, M._opts)
+end
 
 -- Thread the active configuration through, mirroring `build_spec`, so the
 -- nixpkgs_mode override reaches discovery (and `nixpkgs_mode = false` can fully
@@ -81,7 +86,7 @@ function M.discover_positions(file_path)
   end
 
   if opts.discover_eval_checks and vim.fs.basename(file_path) == "flake.nix" then
-    local root = discover.root(file_path)
+    local root = discover.root(file_path, opts)
     local discovered = root ~= nil and eval.eval_outputs(root, opts.eval_outputs, opts) or nil
     if discovered ~= nil and #discovered.outputs > 0 then
       tree = eval.merge_outputs(tree, discovered.system, discovered.outputs)
@@ -102,6 +107,7 @@ local function validate(opts)
   vim.validate("nixpkgs_mode", opts.nixpkgs_mode, "boolean", true)
   vim.validate("discover_nixpkgs_eval_tests", opts.discover_nixpkgs_eval_tests, "boolean", true)
   vim.validate("vm_interactive", opts.vm_interactive, "boolean", true)
+  vim.validate("non_flake_roots", opts.non_flake_roots, "boolean", true)
   vim.validate("nix_bin", opts.nix_bin, "string", true)
   vim.validate("nix_unit_bin", opts.nix_unit_bin, "string", true)
   vim.validate("nix_extra_args", opts.nix_extra_args, "table", true)

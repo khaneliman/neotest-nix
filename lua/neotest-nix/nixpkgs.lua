@@ -157,7 +157,10 @@ function M.resolve_root(file_path, opts)
   end
 
   if opts.nixpkgs_mode == true then
-    return require("neotest-nix.discover").root(file_path)
+    return require("neotest-nix.discover").root(file_path, {
+      nixpkgs_mode = false,
+      non_flake_roots = false,
+    })
   end
 
   return nil

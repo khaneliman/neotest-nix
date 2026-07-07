@@ -303,6 +303,7 @@ local M = {}
 ---@field nixpkgs_mode? boolean Force (true) or disable (false) legacy Nixpkgs handling; nil auto-detects.
 ---@field discover_nixpkgs_eval_tests? boolean Eval a Nixpkgs package to enumerate computed passthru.tests.
 ---@field vm_interactive? boolean Run a single VM-test check's driverInteractive for interactive debugging.
+---@field non_flake_roots? boolean Enable recognized non-flake roots (default true).
 ---@field nix_bin? string Executable for nix CLI invocations (default "nix"); also derives the legacy binaries.
 ---@field nix_unit_bin? string Executable for nix-unit invocations (default "nix-unit").
 ---@field nix_extra_args? string[] Extra args appended to every nix-family command (nix and legacy binaries).

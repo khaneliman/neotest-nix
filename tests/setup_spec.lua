@@ -155,6 +155,7 @@ describe("config validation", function()
         nix_unit_flakes = { { path = "lib/tests", flake = ".#tests" } },
         nixpkgs_mode = true,
         discover_nixpkgs_eval_tests = true,
+        non_flake_roots = true,
         nix_bin = "/opt/nix/bin/nix",
         nix_unit_bin = "/opt/nix/bin/nix-unit",
         nix_extra_args = { "--option", "builders", "" },
@@ -261,6 +262,14 @@ describe("config validation", function()
     assert.has_error(function()
       ---@diagnostic disable-next-line: assign-type-mismatch
       adapter.setup({ nix_unit_extra_args = "-L" })
+    end)
+  end)
+
+  it("rejects a non-boolean non_flake_roots", function()
+    local adapter = require("neotest-nix")
+    assert.has_error(function()
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      adapter.setup({ non_flake_roots = "yes" })
     end)
   end)
 
