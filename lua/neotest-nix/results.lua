@@ -691,6 +691,141 @@ local function nix_eval_results(tree, output, code)
   return attach({ [id] = { status = "failed", short = failure_message(clean), errors = {} } })
 end
 
+-- A failed `nix build`/`nix flake check` names the derivation it could not
+-- build, e.g. `error: builder for '/nix/store/<hash>-<name>.drv' failed with
+-- exit code 1` and `For full logs, run 'nix log /nix/store/<hash>-<name>.drv'`.
+-- Only lines that actually name the failure (rather than any incidental
+-- `.drv` mention) are considered, and duplicates are collapsed so
+-- `--keep-going` runs that repeat the same derivation only queue it once.
+---@param output string
+---@return string[]
+local function detect_failed_drvs(output)
+  local seen = {}
+  local drvs = {}
+
+  for line in output:gmatch("[^\r\n]+") do
+    line = strip_ansi(line)
+    if line:find("failed", 1, true) or line:find("nix log", 1, true) then
+      for drv in line:gmatch("(/nix/store/[^%s'\"]+%.drv)") do
+        if not seen[drv] then
+          seen[drv] = true
+          table.insert(drvs, drv)
+        end
+      end
+    end
+  end
+
+  return drvs
+end
+
+-- Bounds on the `nix log` enrichment so a failing build never makes Neotest
+-- feel slow or floods the output box: each call is timeboxed, and only the
+-- last slice of a log is kept.
+local NIX_LOG_TIMEOUT_MS = 3000
+local NIX_LOG_TAIL_BYTES = 4096
+
+---@param text string
+---@param max_bytes integer
+---@return string
+local function tail_bytes(text, max_bytes)
+  if #text <= max_bytes then
+    return text
+  end
+  return text:sub(#text - max_bytes + 1)
+end
+
+---Run `nix log <drv>`, bounded by `NIX_LOG_TIMEOUT_MS`. Mirrors the
+---`vim.system` + `nio.control.future` pattern already used to shell out
+---synchronously from an async context (see `neotest-nix.eval`'s `run`
+---helper). Returns nil on any failure (spawn error, timeout, non-zero exit,
+---or empty output) so the caller can fall back to a bare repro hint.
+---@param drv string
+---@param root string
+---@param nix_bin string
+---@return string?
+local function run_nix_log(drv, root, nix_bin)
+  local nio = require("nio")
+  local future = nio.control.future()
+  local ok = pcall(vim.system, { nix_bin, "log", drv }, {
+    cwd = root,
+    text = true,
+    timeout = NIX_LOG_TIMEOUT_MS,
+  }, function(system_result)
+    future.set(system_result)
+  end)
+  if not ok then
+    return nil
+  end
+
+  local system_result = future.wait()
+  if system_result.code ~= 0 then
+    return nil
+  end
+
+  local stdout = vim.trim(system_result.stdout or "")
+  if stdout == "" then
+    return nil
+  end
+
+  return stdout
+end
+
+---Build the enrichment text appended after a failed build's own output: a
+---separator, the (capped) `nix log` tail when it could be fetched, and a
+---bare `nix log <drv>` line the user can copy-paste to see the rest. Never
+---raises and never returns nil once at least one `.drv` was detected, so a
+---`nix log` failure still leaves the repro hint behind.
+---@param drv string
+---@param root string
+---@param nix_bin string
+---@return string
+local function drv_log_section(drv, root, nix_bin)
+  local lines = { "---" }
+  local log = run_nix_log(drv, root, nix_bin)
+  if log ~= nil then
+    table.insert(lines, tail_bytes(log, NIX_LOG_TAIL_BYTES))
+  end
+  table.insert(lines, ("%s log %s"):format(nix_bin, drv))
+  return table.concat(lines, "\n")
+end
+
+---@param results table<string, neotest.Result>
+---@return integer
+local function count_failed(results)
+  local count = 0
+  for _, result in pairs(results) do
+    if result.status == "failed" then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+---Enrich a failed build/flake-check result with `nix log` output for any
+---failed derivation named in its own output. Bounded to the number of
+---failed positions in this run, so a pathological `--keep-going` run with
+---many failures cannot turn one result into dozens of `nix log` calls.
+---Returns nil when no `.drv` was detected, leaving the result untouched.
+---@param output string
+---@param root string
+---@param results table<string, neotest.Result>
+---@param nix_bin string
+---@return string?
+local function build_drv_enrichment(output, root, results, nix_bin)
+  local drvs = detect_failed_drvs(output)
+  if #drvs == 0 then
+    return nil
+  end
+
+  local max_logs = math.max(count_failed(results), 1)
+  local sections = {}
+  for index = 1, math.min(#drvs, max_logs) do
+    table.insert(sections, drv_log_section(drvs[index], root, nix_bin))
+  end
+
+  return table.concat(sections, "\n\n")
+end
+
 ---@param spec neotest.RunSpec
 ---@param result neotest.StrategyResult
 ---@param tree neotest.Tree
@@ -732,6 +867,18 @@ function M.results(spec, result, tree)
       short = failure_message(output),
       errors = {},
     }
+  end
+
+  local context = spec.context or {}
+  local nix_bin = context.nix_bin or "nix"
+  local enrichment = build_drv_enrichment(output, root, results, nix_bin)
+  if enrichment ~= nil then
+    local out = write_output(vim.trim(output) .. "\n\n" .. enrichment)
+    if out ~= nil then
+      for _, entry in pairs(results) do
+        entry.output = out
+      end
+    end
   end
 
   return paths.translate_result_paths(results, root)

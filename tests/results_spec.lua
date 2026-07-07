@@ -1014,3 +1014,144 @@ describe("nix-unit results", function()
     assert.are.equal("passed", parsed[position_tree:data().id].status)
   end)
 end)
+
+describe("nix log enrichment", function()
+  ---Stub vim.system so `nix log <drv>` returns canned output; the callback
+  ---fires synchronously so the nio future inside results.lua resolves at once.
+  ---@param response table
+  ---@return table[] calls
+  local function stub_nix_log(response)
+    local original = vim.system
+    local calls = {}
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(command, opts, callback)
+      table.insert(calls, { command = command, opts = opts })
+      callback(response)
+      return {}
+    end
+    finally(function()
+      vim.system = original
+    end)
+    return calls
+  end
+
+  ---@param drv string
+  ---@return string[]
+  local function build_failure_lines(drv)
+    return {
+      ("error: builder for '%s' failed with exit code 1"):format(drv),
+      ("For full logs, run 'nix log %s'."):format(drv),
+    }
+  end
+
+  it("fetches the nix log tail and appends a copy-pasteable repro line", function()
+    local root = project()
+    local position_tree = tree(root)
+    local drv = "/nix/store/abc123-name.drv"
+    local calls = stub_nix_log({ code = 0, stdout = "build step 1\nbuild step 2\n", stderr = "" })
+
+    local parsed = results.results(
+      run_spec(root),
+      { code = 1, output = output_file(build_failure_lines(drv)) },
+      position_tree
+    )
+
+    local result = parsed[position_tree:data().id]
+    assert.are.equal("failed", result.status)
+    assert.are.equal(1, #calls)
+    assert.are.same({ "nix", "log", drv }, calls[1].command)
+    assert.are.equal(root, calls[1].opts.cwd)
+    assert.are.equal(3000, calls[1].opts.timeout)
+
+    if result.output == nil then
+      error("expected nix log enrichment to attach an output file")
+    end
+    local body = table.concat(vim.fn.readfile(result.output), "\n")
+    assert.is_truthy(body:find("build step 1", 1, true))
+    assert.is_truthy(body:find("build step 2", 1, true))
+    assert.is_truthy(body:find(("nix log %s"):format(drv), 1, true))
+  end)
+
+  it("uses configured nix_bin for nix log enrichment", function()
+    local root = project()
+    local position_tree = tree(root)
+    local drv = "/nix/store/custom-name.drv"
+    local calls = stub_nix_log({ code = 0, stdout = "custom log\n", stderr = "" })
+
+    local parsed = results.results(
+      run_spec(root, { nix_bin = "/opt/nix/bin/nix" }),
+      { code = 1, output = output_file(build_failure_lines(drv)) },
+      position_tree
+    )
+
+    local result = parsed[position_tree:data().id]
+    assert.are.equal("failed", result.status)
+    assert.are.equal(1, #calls)
+    assert.are.same({ "/opt/nix/bin/nix", "log", drv }, calls[1].command)
+
+    if result.output == nil then
+      error("expected nix log enrichment to attach an output file")
+    end
+    local body = table.concat(vim.fn.readfile(result.output), "\n")
+    assert.is_truthy(body:find("/opt/nix/bin/nix log " .. drv, 1, true))
+  end)
+
+  it("still appends the repro line when nix log itself fails", function()
+    local root = project()
+    local position_tree = tree(root)
+    local drv = "/nix/store/def456-name.drv"
+    stub_nix_log({ code = 1, stdout = "", stderr = "getting status of path: No such file" })
+
+    local parsed = results.results(
+      run_spec(root),
+      { code = 1, output = output_file(build_failure_lines(drv)) },
+      position_tree
+    )
+
+    local result = parsed[position_tree:data().id]
+    assert.are.equal("failed", result.status)
+    if result.output == nil then
+      error("expected a repro-only output file even when nix log fails")
+    end
+    local body = table.concat(vim.fn.readfile(result.output), "\n")
+    assert.is_truthy(body:find(("nix log %s"):format(drv), 1, true))
+    assert.is_nil(body:find("getting status of path", 1, true))
+  end)
+
+  it("does not enrich a passing run", function()
+    local root = project()
+    local position_tree = tree(root)
+    local calls = stub_nix_log({ code = 0, stdout = "ignored", stderr = "" })
+
+    local parsed =
+      results.results(run_spec(root), { code = 0, output = output_file({ "ok" }) }, position_tree)
+
+    assert.are.equal("passed", parsed[position_tree:data().id].status)
+    assert.are.equal(0, #calls)
+    assert.is_nil(parsed[position_tree:data().id].output)
+  end)
+
+  it("caps the fetched log tail so a huge log cannot flood the output", function()
+    local root = project()
+    local position_tree = tree(root)
+    local drv = "/nix/store/ghi789-name.drv"
+    local head_marker = "HEAD_MARKER"
+    local tail_marker = "TAIL_MARKER"
+    local long_log = head_marker .. string.rep("a", 8000) .. tail_marker
+    stub_nix_log({ code = 0, stdout = long_log, stderr = "" })
+
+    local parsed = results.results(
+      run_spec(root),
+      { code = 1, output = output_file(build_failure_lines(drv)) },
+      position_tree
+    )
+
+    local result = parsed[position_tree:data().id]
+    if result.output == nil then
+      error("expected the capped log tail to be attached")
+    end
+    local body = table.concat(vim.fn.readfile(result.output), "\n")
+    assert.is_nil(body:find(head_marker, 1, true))
+    assert.is_truthy(body:find(tail_marker, 1, true))
+  end)
+end)
