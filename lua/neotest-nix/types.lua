@@ -306,7 +306,9 @@ local M = {}
 ---@field non_flake_roots? boolean Enable recognized non-flake roots (default true).
 ---@field nix_bin? string Executable for nix CLI invocations (default "nix"); also derives the legacy binaries.
 ---@field nix_unit_bin? string Executable for nix-unit invocations (default "nix-unit").
+---@field namaka_bin? string Executable for Namaka invocations (default "namaka").
 ---@field nix_extra_args? string[] Extra args appended to every nix-family command (nix and legacy binaries).
 ---@field nix_unit_extra_args? string[] Extra args appended to every nix-unit command.
+---@field namaka_extra_args? string[] Extra global args inserted before Namaka's command.
 
 return M

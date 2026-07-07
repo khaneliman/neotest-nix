@@ -370,6 +370,31 @@ describe("results", function()
     assert.are.equal("failed", parsed[position_tree:data().id].status)
   end)
 
+  it("maps Namaka exit status to the invoked node", function()
+    local root = project()
+    local position_tree = Tree:new({
+      id = vim.fs.joinpath(root, "namaka.toml"),
+      name = "namaka.toml",
+      path = vim.fs.joinpath(root, "namaka.toml"),
+      type = "file",
+    })
+
+    local passed = results.results(
+      run_spec(root, { runner = "namaka" }),
+      { code = 0, output = output_file({ "all snapshots pass" }) },
+      position_tree
+    )
+    assert.are.equal("passed", passed[position_tree:data().id].status)
+
+    local failed = results.results(
+      run_spec(root, { runner = "namaka" }),
+      { code = 1, output = output_file({ "snapshot mismatch" }) },
+      position_tree
+    )
+    assert.are.equal("failed", failed[position_tree:data().id].status)
+    assert.is_truthy(failed[position_tree:data().id].short:find("snapshot mismatch", 1, true))
+  end)
+
   it("parses nix errors with translated local diagnostics", function()
     local root = project()
     local position_tree = tree(root)

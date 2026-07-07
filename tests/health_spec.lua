@@ -75,7 +75,12 @@ describe("health config check", function()
   end)
 
   it("reports a valid configuration", function()
-    check_with_opts({ discover_eval_checks = true, eval_outputs = { { attr = "checks" } } })
+    check_with_opts({
+      discover_eval_checks = true,
+      eval_outputs = { { attr = "checks" } },
+      non_flake_roots = true,
+      namaka_extra_args = { "--show-trace" },
+    })
     assert.is_true(any_match(recorded.ok, "configuration looks valid"))
   end)
 
@@ -191,6 +196,23 @@ describe("health config check", function()
 
     check_with_opts({})
     assert.is_true(any_match(recorded.warn, "`nix%-unit` not found on PATH"))
+  end)
+
+  it("warns when namaka is not on PATH", function()
+    local real_executable = vim.fn.executable
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.fn.executable = function(name)
+      if name == "namaka" then
+        return 0
+      end
+      return real_executable(name)
+    end
+    finally(function()
+      vim.fn.executable = real_executable
+    end)
+
+    check_with_opts({})
+    assert.is_true(any_match(recorded.warn, "`namaka` not found on PATH"))
   end)
 
   ---@param stdout string

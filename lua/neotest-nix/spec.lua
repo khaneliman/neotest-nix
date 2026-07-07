@@ -16,7 +16,7 @@ M.system_pattern = "^[a-z0-9_]+%-[a-z0-9_]+$"
 ---@class neotest-nix.Position : neotest.Position
 ---@field attr_path? string
 ---@field attr_path_parts? string[]
----@field runner? "nix"|"nix-unit"
+---@field runner? "nix"|"nix-unit"|"nix-eval"|"namaka"
 ---@field nix_unit_kind? "flake"|"import"
 ---@field test_script_range? integer[]
 ---@field nixpkgs_attr? string Legacy `nix-build -A` attribute for a Nixpkgs test.
@@ -25,6 +25,7 @@ M.system_pattern = "^[a-z0-9_]+%-[a-z0-9_]+$"
 ---@field nixpkgs_eval_test? string Single `lib.runTests` test name selected from a Nixpkgs eval file.
 ---@field dynamic_system? boolean True when `attr_path` carries a literal `<system>`
 ---placeholder resolved to the current system at run time.
+---@field namaka_root? string Root containing namaka.toml.
 
 local nix_features = {
   "--extra-experimental-features",
@@ -57,6 +58,12 @@ end
 ---@return string
 local function nix_unit_bin(opts)
   return (opts and opts.nix_unit_bin) or "nix-unit"
+end
+
+---@param opts neotest-nix.Config?
+---@return string
+local function namaka_bin(opts)
+  return require("neotest-nix.namaka").bin(opts)
 end
 
 -- Splices the adapter's configured `nix_extra_args`/`nix_unit_extra_args`
@@ -395,9 +402,10 @@ local function namespace_nix_unit_flake(tree)
 end
 
 ---@param path string
+---@param opts neotest-nix.Config?
 ---@return string
-local function cwd_for(path)
-  return discover.root(path) or uv.cwd() or "."
+local function cwd_for(path, opts)
+  return discover.root(path, opts) or uv.cwd() or "."
 end
 
 ---This adapter's custom streaming strategy should only back a run's *default*
@@ -480,7 +488,27 @@ function M.build_spec(args, opts)
     return nil
   end
 
-  local cwd = cwd_for(position.path)
+  local cwd = cwd_for(position.path, opts)
+
+  if position.runner == "namaka" then
+    local namaka = require("neotest-nix.namaka")
+    local command = { namaka_bin(opts) }
+    namaka.append_extra_args(command, opts)
+    table.insert(command, "check")
+    local run_spec = {
+      command = with_extra_args(command, args.extra_args),
+      cwd = position.namaka_root or namaka.root(position.path) or cwd,
+      strategy = run_strategy(args.strategy),
+      context = {
+        attr = position.path,
+        path = position.path,
+        pos_id = position.id,
+        runner = "namaka",
+        type = position.type,
+      },
+    }
+    return run_spec
+  end
 
   -- `test_script_range` marks a single VM-test check (a flake check or a
   -- nixpkgs `nixosTests.<name>` file whose `testScript` was found by source

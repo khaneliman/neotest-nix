@@ -845,6 +845,40 @@ describe("spec", function()
     end
   )
 
+  it("builds a Namaka check command at the Namaka root", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "tests", "case", "expr.nix")
+    local test = node({
+      id = path,
+      name = "expr.nix",
+      namaka_root = root,
+      path = path,
+      runner = "namaka",
+      type = "file",
+    })
+
+    ---@type any
+    local run_args = { tree = test, extra_args = { "--no-color" } }
+    local run = spec.build_spec(run_args, {
+      namaka_bin = "namaka-custom",
+      namaka_extra_args = { "--config", "namaka.toml" },
+    })
+
+    assert.is_not_nil(run)
+    ---@cast run neotest.RunSpec
+    assert.same({
+      "namaka-custom",
+      "--config",
+      "namaka.toml",
+      "check",
+      "--no-color",
+    }, run.command)
+    assert.are.equal(root, run.cwd)
+    assert.are.equal("namaka", run.context.runner)
+    assert.is_function(run.strategy)
+    assert.is_nil(run.stream)
+  end)
+
   it("does not build specs for directory positions", function()
     ---@type any
     local run_args = {

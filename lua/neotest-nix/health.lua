@@ -131,10 +131,13 @@ local known_config_fields = {
   nixpkgs_mode = "boolean",
   discover_nixpkgs_eval_tests = "boolean",
   vm_interactive = "boolean",
+  non_flake_roots = "boolean",
   nix_bin = "string",
   nix_unit_bin = "string",
+  namaka_bin = "string",
   nix_extra_args = "table",
   nix_unit_extra_args = "table",
+  namaka_extra_args = "table",
 }
 
 ---Inspect the active adapter configuration for typos and wrong-typed fields.
@@ -185,6 +188,15 @@ local function check_config()
       if type(arg) ~= "string" then
         valid = false
         health.error(("nix_unit_extra_args[%d] must be a string"):format(index))
+      end
+    end
+  end
+
+  if type(opts.namaka_extra_args) == "table" then
+    for index, arg in ipairs(opts.namaka_extra_args) do
+      if type(arg) ~= "string" then
+        valid = false
+        health.error(("namaka_extra_args[%d] must be a string"):format(index))
       end
     end
   end
@@ -245,6 +257,7 @@ function M.check()
 
   local nix_bin = opts.nix_bin or "nix"
   local nix_unit_bin = opts.nix_unit_bin or "nix-unit"
+  local namaka_bin = opts.namaka_bin or "namaka"
 
   if vim.fn.executable(nix_bin) == 1 then
     health.ok(("`%s` on PATH"):format(nix_bin))
@@ -262,6 +275,15 @@ function M.check()
     health.warn(
       ("`%s` not found on PATH"):format(nix_unit_bin),
       "Only required to run nix-unit tests; see https://github.com/nix-community/nix-unit"
+    )
+  end
+
+  if vim.fn.executable(namaka_bin) == 1 then
+    health.ok(("`%s` on PATH"):format(namaka_bin))
+  else
+    health.warn(
+      ("`%s` not found on PATH"):format(namaka_bin),
+      "Only required to run Namaka snapshot tests; see https://github.com/nix-community/namaka"
     )
   end
 

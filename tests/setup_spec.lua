@@ -158,8 +158,10 @@ describe("config validation", function()
         non_flake_roots = true,
         nix_bin = "/opt/nix/bin/nix",
         nix_unit_bin = "/opt/nix/bin/nix-unit",
+        namaka_bin = "/opt/nix/bin/namaka",
         nix_extra_args = { "--option", "builders", "" },
         nix_unit_extra_args = { "-L" },
+        namaka_extra_args = { "--show-trace" },
       })
     end)
   end)
@@ -273,6 +275,22 @@ describe("config validation", function()
     end)
   end)
 
+  it("rejects a non-string namaka_bin", function()
+    local adapter = require("neotest-nix")
+    assert.has_error(function()
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      adapter.setup({ namaka_bin = 42 })
+    end)
+  end)
+
+  it("rejects a non-table namaka_extra_args", function()
+    local adapter = require("neotest-nix")
+    assert.has_error(function()
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      adapter.setup({ namaka_extra_args = "-v" })
+    end)
+  end)
+
   it("rejects non-string nix_extra_args entries", function()
     local err = setup_error({
       ---@diagnostic disable-next-line: assign-type-mismatch
@@ -289,6 +307,15 @@ describe("config validation", function()
     })
 
     assert.is_truthy(err:find("nix_unit_extra_args[1]", 1, true))
+  end)
+
+  it("rejects non-string namaka_extra_args entries", function()
+    local err = setup_error({
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      namaka_extra_args = { false },
+    })
+
+    assert.is_truthy(err:find("namaka_extra_args[1]", 1, true))
   end)
 end)
 
@@ -388,6 +415,19 @@ describe("config options reach discovery", function()
 
     parser.ensure_nix_parser = original
     assert.same(roots, captured)
+  end)
+
+  it("does not discover non-flake Namaka positions when non_flake_roots is false", function()
+    local root = vim.fn.tempname()
+    local tests = vim.fs.joinpath(root, "tests", "case")
+    vim.fn.mkdir(tests, "p")
+    vim.fn.writefile({ "[namaka]" }, vim.fs.joinpath(root, "namaka.toml"))
+    local path = vim.fs.joinpath(tests, "expr.nix")
+    vim.fn.writefile({ "1 + 1" }, path)
+
+    local adapter = require("neotest-nix").setup({ non_flake_roots = false })
+
+    assert.is_nil(adapter.discover_positions(path))
   end)
 
   it("uses the latest configuration when reconfigured (single instance)", function()

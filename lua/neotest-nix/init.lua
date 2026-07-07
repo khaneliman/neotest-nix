@@ -63,6 +63,16 @@ M._merge_eval_outputs = eval.merge_outputs
 function M.discover_positions(file_path)
   local opts = M._opts
 
+  if opts.non_flake_roots == false and discover.root(file_path, opts) == nil then
+    return nil
+  end
+
+  local namaka = require("neotest-nix.namaka")
+  local namaka_root = namaka.root(file_path)
+  if namaka_root ~= nil and namaka.is_test_file(file_path, namaka_root) then
+    return namaka.discover_positions(file_path, namaka_root)
+  end
+
   -- Nixpkgs files (e.g. a `pkgs/by-name` package) build their own position tree
   -- from a static parse instead of the flake tree-sitter query.
   local nixpkgs = require("neotest-nix.nixpkgs")
@@ -110,8 +120,10 @@ local function validate(opts)
   vim.validate("non_flake_roots", opts.non_flake_roots, "boolean", true)
   vim.validate("nix_bin", opts.nix_bin, "string", true)
   vim.validate("nix_unit_bin", opts.nix_unit_bin, "string", true)
+  vim.validate("namaka_bin", opts.namaka_bin, "string", true)
   vim.validate("nix_extra_args", opts.nix_extra_args, "table", true)
   vim.validate("nix_unit_extra_args", opts.nix_unit_extra_args, "table", true)
+  vim.validate("namaka_extra_args", opts.namaka_extra_args, "table", true)
 
   if opts.parser_runtime_paths ~= nil then
     for index, path in ipairs(opts.parser_runtime_paths) do
@@ -128,6 +140,12 @@ local function validate(opts)
   if opts.nix_unit_extra_args ~= nil then
     for index, arg in ipairs(opts.nix_unit_extra_args) do
       vim.validate(("nix_unit_extra_args[%d]"):format(index), arg, "string")
+    end
+  end
+
+  if opts.namaka_extra_args ~= nil then
+    for index, arg in ipairs(opts.namaka_extra_args) do
+      vim.validate(("namaka_extra_args[%d]"):format(index), arg, "string")
     end
   end
 

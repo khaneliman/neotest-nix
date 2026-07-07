@@ -7,6 +7,7 @@ local excluded_dirs = {
   [".direnv"] = true,
   ["node_modules"] = true,
   ["result"] = true,
+  ["_snapshots"] = true,
 }
 
 ---@param path string
@@ -325,6 +326,11 @@ function M.root(dir, opts)
     return nil
   end
 
+  local namaka_root = require("neotest-nix.namaka").root(start)
+  if namaka_root ~= nil then
+    return namaka_root
+  end
+
   if recognized_non_flake_test_file(normalized) then
     local git_root = marker_dir(start, ".git", "directory")
     return git_root or vim.fs.dirname(normalized)
@@ -441,7 +447,10 @@ end
 function M.is_test_file(file_path, opts)
   opts = opts or {}
   if file_path:sub(-4) ~= ".nix" then
-    return false
+    if opts.non_flake_roots == false then
+      return false
+    end
+    return require("neotest-nix.namaka").is_test_file(file_path)
   end
 
   local filename = file_path:match("[^/\\]+$") or file_path
@@ -456,6 +465,13 @@ function M.is_test_file(file_path, opts)
 
   local start = existing_start(vim.fs.normalize(file_path))
   local has_flake = start ~= nil and flake_root(start) ~= nil
+  if opts.non_flake_roots ~= false then
+    local namaka = require("neotest-nix.namaka")
+    local namaka_root = start ~= nil and namaka.root(start) or nil
+    if namaka_root ~= nil and namaka.is_test_file(file_path, namaka_root) then
+      return true
+    end
+  end
 
   -- A file qualifies as test-named when either the file itself or its
   -- immediate parent directory is test-named (e.g. `tests/default.nix`).

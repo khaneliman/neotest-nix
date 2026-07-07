@@ -708,6 +708,27 @@ local function nix_eval_results(tree, output, code)
   return attach({ [id] = { status = "failed", short = failure_message(clean), errors = {} } })
 end
 
+---@param tree neotest.Tree
+---@param output string
+---@param code integer
+---@return table<string, neotest.Result>
+local function namaka_results(tree, output, code)
+  local root_id = tree:data().id
+  if code == 0 then
+    return { [root_id] = { status = "passed", short = output } }
+  end
+
+  return {
+    [root_id] = {
+      status = "failed",
+      short = vim.trim(output) ~= "" and output or "Namaka command failed",
+      errors = {
+        { message = vim.trim(output) ~= "" and output or "Namaka command failed" },
+      },
+    },
+  }
+end
+
 -- A failed `nix build`/`nix flake check` names the derivation it could not
 -- build, e.g. `error: builder for '/nix/store/<hash>-<name>.drv' failed with
 -- exit code 1` and `For full logs, run 'nix log /nix/store/<hash>-<name>.drv'`.
@@ -858,6 +879,10 @@ function M.results(spec, result, tree)
 
   if spec.context ~= nil and spec.context.runner == "nix-eval" then
     return nix_eval_results(tree, output, result.code)
+  end
+
+  if spec.context ~= nil and spec.context.runner == "namaka" then
+    return namaka_results(tree, output, result.code)
   end
 
   if result.code == 0 then
