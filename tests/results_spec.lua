@@ -1013,6 +1013,171 @@ describe("nix-unit results", function()
     assert.are.equal("passed", parsed.testFail.status)
     assert.are.equal("passed", parsed[position_tree:data().id].status)
   end)
+
+  it("streams nix-unit per-attribute results as complete lines arrive", function()
+    local root = project()
+    local position_tree = unit_tree(root)
+    local chunks = {
+      "\226\156\133 testPass\n",
+      "\226\157\140 testFail\n",
+      "{ x = 1; } != { y = 1; }\n",
+    }
+    local index = 0
+    local stream = results.stream(run_spec(root, { runner = "nix-unit" }), position_tree)(function()
+      index = index + 1
+      return chunks[index]
+    end)
+
+    local first = stream()
+    if first == nil or first.testPass == nil then
+      error("missing streamed testPass result")
+    end
+    assert.are.equal("passed", first.testPass.status)
+
+    local second = stream()
+    if second == nil or second.testFail == nil then
+      error("missing streamed testFail result")
+    end
+    assert.are.equal("failed", second.testFail.status)
+
+    -- The diff block that follows keeps accumulating into testFail's own
+    -- entry rather than being mistaken for a new result.
+    local third = stream()
+    if third == nil or third.testFail == nil then
+      error("missing updated streamed testFail result")
+    end
+    assert.are.equal("{ x = 1; } != { y = 1; }", third.testFail.short)
+  end)
+
+  it(
+    "does not treat a multi-line diff block or the suite summary as a new nix-unit result",
+    function()
+      local root = project()
+      local position_tree = unit_tree(root)
+      local chunks = {
+        "\226\157\140 testFail\n",
+        "{ x = 1; }\n",
+        "!= { y = 1; }\n",
+        "\226\156\133 testPass\n",
+        "\240\159\152\162 1/2 successful\n",
+        "error: Tests failed\n",
+      }
+      local index = 0
+      local stream = results.stream(run_spec(root, { runner = "nix-unit" }), position_tree)(
+        function()
+          index = index + 1
+          return chunks[index]
+        end
+      )
+
+      local seen = {}
+      while true do
+        local parsed = stream()
+        if parsed == nil then
+          break
+        end
+        for id, result in pairs(parsed) do
+          seen[id] = result
+        end
+      end
+
+      if seen.testFail == nil or seen.testPass == nil then
+        error("missing streamed nix-unit results")
+      end
+      assert.are.equal("failed", seen.testFail.status)
+      assert.are.equal("{ x = 1; }\n!= { y = 1; }", seen.testFail.short)
+      assert.are.equal("passed", seen.testPass.status)
+
+      -- Only the two real attributes were ever reported; the diff lines and
+      -- the summary/error lines never surfaced as bogus extra positions.
+      local count = 0
+      for _ in pairs(seen) do
+        count = count + 1
+      end
+      assert.are.equal(2, count)
+    end
+  )
+
+  it(
+    "waits for a complete nix-unit line before resolving a position, even if a partial name would collide",
+    function()
+      local root = project()
+      local file_path = vim.fs.joinpath(root, "lib", "tests", "default.nix")
+      local function leaf(name)
+        return Tree:new({
+          id = name,
+          name = name,
+          path = file_path,
+          range = { 0, 0, 3, 0 },
+          type = "test",
+        })
+      end
+      local position_tree = Tree:new({
+        id = file_path,
+        name = "default.nix",
+        path = file_path,
+        type = "file",
+      }, { leaf("testF"), leaf("testFail") })
+
+      local chunks = {
+        -- "testFail" is still arriving; a premature parse of this chunk alone
+        -- would incorrectly resolve to the unrelated "testF" position.
+        "\226\157\140 testF",
+        "ail\n",
+        "\240\159\152\162 0/1 successful\n",
+      }
+      local index = 0
+      local stream = results.stream(run_spec(root, { runner = "nix-unit" }), position_tree)(
+        function()
+          index = index + 1
+          return chunks[index]
+        end
+      )
+
+      local first = stream()
+      if first == nil or first.testFail == nil then
+        error("missing streamed testFail result")
+      end
+      assert.are.equal("failed", first.testFail.status)
+      assert.is_nil(first.testF)
+    end
+  )
+
+  it("lets the final parse override anything reported by the streaming partial", function()
+    local root = project()
+    local position_tree = unit_tree(root)
+    local run = run_spec(root, { runner = "nix-unit" })
+
+    -- A transient streamed view of the run in progress...
+    local partial_chunks = { "\226\156\133 testPass\n" }
+    local index = 0
+    local stream = results.stream(run, position_tree)(function()
+      index = index + 1
+      return partial_chunks[index]
+    end)
+    local streamed = stream()
+    if streamed == nil or streamed.testPass == nil then
+      error("missing streamed testPass result")
+    end
+    assert.are.equal("passed", streamed.testPass.status)
+
+    -- ...disagrees with the run's actual final output. The full-output parse
+    -- must win regardless of what streamed earlier.
+    local parsed = results.results(run, {
+      code = 1,
+      output = output_file({
+        "\226\157\140 testPass",
+        "expected true, got false",
+        "",
+        "\226\156\133 testFail",
+        "",
+        "\240\159\152\162 1/2 successful",
+      }),
+    }, position_tree)
+
+    assert.are.equal("failed", parsed.testPass.status)
+    assert.are.equal("passed", parsed.testFail.status)
+  end)
 end)
 
 describe("nix log enrichment", function()

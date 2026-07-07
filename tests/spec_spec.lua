@@ -214,6 +214,9 @@ describe("spec", function()
     }, run.command)
     assert.are.equal(".#tests", run.context.attr)
     assert.are.equal("nix-unit", run.context.runner)
+    -- A whole-suite `nix-unit --flake` run streams each attribute's
+    -- pass/fail as it prints, instead of waiting for the suite to finish.
+    assert.is_function(run.stream)
   end)
 
   it("builds a targeted nix-unit expression for flake nix-unit tests", function()
@@ -240,6 +243,7 @@ describe("spec", function()
     assert.are.equal(root, run.cwd)
     assert.are.equal("tests.testPass", run.context.attr)
     assert.are.equal("nix-unit", run.context.runner)
+    assert.is_function(run.stream)
   end)
 
   it("quotes nix-unit attr segments that are not identifiers", function()
@@ -400,8 +404,8 @@ describe("spec", function()
     assert.is_nil(expr:find("builtins.head", 1, true))
     assert.are.equal(".#tests", run.context.attr)
     assert.are.equal("nix-unit", run.context.runner)
-    -- nix-unit results are parsed in full at the end, so no incremental stream.
-    assert.is_nil(run.stream)
+    -- nix-unit reports its own per-attribute results incrementally too.
+    assert.is_function(run.stream)
   end)
 
   it("escapes nix string syntax in single-test select expressions", function()
@@ -457,6 +461,25 @@ describe("spec", function()
       ".#tests",
     }, run.command)
     assert.are.equal("nix-unit", run.context.runner)
+  end)
+
+  it("attaches streaming to every nix-unit run spec, not just plain nix builds", function()
+    local root = project()
+    local test = node({
+      attr_path = "checks.aarch64-darwin.unit",
+      attr_path_parts = { "checks", "aarch64-darwin", "unit" },
+      id = "unit",
+      name = "unit",
+      nix_unit_kind = "flake",
+      path = vim.fs.joinpath(root, "flake.nix"),
+      runner = "nix-unit",
+      type = "test",
+    })
+
+    local run = build_spec({ tree = test })
+
+    assert.are.equal("nix-unit", run.context.runner)
+    assert.is_function(run.stream)
   end)
 
   it("warns when no flake output can be resolved for wrapped nix-unit tests", function()

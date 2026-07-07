@@ -372,6 +372,97 @@ local function add_vm_tracebacks(results, target, output, start_at)
   return #tracebacks
 end
 
+-- nix-unit names each test by its dotted path within the run set, which may
+-- carry a runtime prefix the source has no position for (e.g.
+-- "systems.x86_64-linux.testFoo" for a per-system suite). Match the most
+-- specific thing first, then fall back to the leaf attribute, which is what a
+-- position is named. A leaf shared by several positions is left unmatched
+-- rather than attributed to the wrong one.
+--
+-- Shared by the final (whole-output) nix-unit parse and the incremental
+-- streaming parse, so both resolve a name to a position the same way.
+---@param positions neotest.Position[]
+---@param name string
+---@return neotest.Position?
+local function match_nix_unit_position(positions, name)
+  for _, position in ipairs(positions) do
+    ---@cast position neotest-nix.Position
+    if position.name == name or position.attr_path == name then
+      return position
+    end
+  end
+  -- A suffix shared by several attr_paths is ambiguous, so fall through to
+  -- the leaf check (which carries the same guard) rather than blaming the
+  -- first match.
+  local suffix_match
+  for _, position in ipairs(positions) do
+    ---@cast position neotest-nix.Position
+    local attr_path = position.attr_path
+    if attr_path ~= nil and attr_path:sub(-(#name + 1)) == "." .. name then
+      if suffix_match ~= nil then
+        suffix_match = nil
+        break
+      end
+      suffix_match = position
+    end
+  end
+  if suffix_match ~= nil then
+    return suffix_match
+  end
+
+  local leaf = name:match("[^.]+$") or name
+  local found
+  for _, position in ipairs(positions) do
+    if position.name == leaf then
+      if found ~= nil then
+        return nil
+      end
+      found = position
+    end
+  end
+  return found
+end
+
+---Fold nix-unit per-attribute entries into per-position results. Shared by the
+---final (whole-output) parse and the incremental streaming parse: a passing
+---occurrence never overwrites an earlier failure for the same position, since
+---the same leaf can appear once per system and any failing occurrence wins.
+---@param entries neotest-nix.NixUnitEntry[]
+---@param positions neotest.Position[]
+---@return table<string, neotest.Result>
+---@return boolean any_failed
+local function nix_unit_entry_results(entries, positions)
+  local results = {}
+  local any_failed = false
+  for _, entry in ipairs(entries) do
+    if entry.status ~= "passed" then
+      any_failed = true
+    end
+
+    local position = match_nix_unit_position(positions, entry.name)
+    if position ~= nil then
+      local existing = results[position.id]
+      if entry.status == "passed" then
+        -- Keep an earlier failure: the same leaf can appear under several
+        -- systems, and any failing occurrence should win.
+        if existing == nil then
+          results[position.id] = { status = "passed", short = entry.message }
+        end
+      else
+        results[position.id] = {
+          status = "failed",
+          short = entry.message,
+          errors = {
+            { message = entry.message ~= "" and entry.message or (entry.name .. " failed") },
+          },
+        }
+      end
+    end
+  end
+
+  return results, any_failed
+end
+
 ---Build results for a nix-unit run from its per-attribute output. Each test
 ---attribute is mapped to its position by name; the run's own node carries the
 ---overall verdict so file/suite runs still report a status.
@@ -404,81 +495,7 @@ local function nix_unit_results(tree, output, code, root, spec)
   end
 
   local positions = test_positions(tree)
-
-  -- nix-unit names each test by its dotted path within the run set, which may
-  -- carry a runtime prefix the source has no position for (e.g.
-  -- "systems.x86_64-linux.testFoo" for a per-system suite). Match the most
-  -- specific thing first, then fall back to the leaf attribute, which is what a
-  -- position is named. A leaf shared by several positions is left unmatched
-  -- rather than attributed to the wrong one.
-  ---@param name string
-  ---@return neotest.Position?
-  local function match_position(name)
-    for _, position in ipairs(positions) do
-      ---@cast position neotest-nix.Position
-      if position.name == name or position.attr_path == name then
-        return position
-      end
-    end
-    -- A suffix shared by several attr_paths is ambiguous, so fall through to
-    -- the leaf check (which carries the same guard) rather than blaming the
-    -- first match.
-    local suffix_match
-    for _, position in ipairs(positions) do
-      ---@cast position neotest-nix.Position
-      local attr_path = position.attr_path
-      if attr_path ~= nil and attr_path:sub(-(#name + 1)) == "." .. name then
-        if suffix_match ~= nil then
-          suffix_match = nil
-          break
-        end
-        suffix_match = position
-      end
-    end
-    if suffix_match ~= nil then
-      return suffix_match
-    end
-
-    local leaf = name:match("[^.]+$") or name
-    local found
-    for _, position in ipairs(positions) do
-      if position.name == leaf then
-        if found ~= nil then
-          return nil
-        end
-        found = position
-      end
-    end
-    return found
-  end
-
-  local results = {}
-  local any_failed = false
-  for _, entry in ipairs(entries) do
-    if entry.status ~= "passed" then
-      any_failed = true
-    end
-
-    local position = match_position(entry.name)
-    if position ~= nil then
-      local existing = results[position.id]
-      if entry.status == "passed" then
-        -- Keep an earlier failure: the same leaf can appear under several
-        -- systems, and any failing occurrence should win.
-        if existing == nil then
-          results[position.id] = { status = "passed", short = entry.message }
-        end
-      else
-        results[position.id] = {
-          status = "failed",
-          short = entry.message,
-          errors = {
-            { message = entry.message ~= "" and entry.message or (entry.name .. " failed") },
-          },
-        }
-      end
-    end
-  end
+  local results, any_failed = nix_unit_entry_results(entries, positions)
 
   if results[root_id] == nil then
     results[root_id] = { status = any_failed and "failed" or "passed", short = clean_output }
@@ -884,6 +901,43 @@ function M.results(spec, result, tree)
   return paths.translate_result_paths(results, root)
 end
 
+---Incrementally parse nix-unit's per-attribute output as it streams in,
+---returning only positions whose result changed since the last call. Only
+---complete lines (those already terminated by a newline) are handed to
+---`M.parse_nix_unit`: a marker or detail line still arriving byte-by-byte
+---must never be matched to a position before it has fully arrived (e.g. a
+---truncated name that happens to collide with a *different*, shorter
+---attribute name). A multi-line diff block is unaffected by this since it
+---keeps accumulating into the same attribute's entry, exactly like the final
+---(whole-output) parse already does; nothing here needs to guess where a
+---detail block ends. Whatever is reported here is always superseded by the
+---authoritative parse in `nix_unit_results` once the run finishes, so a
+---mis-resolved or still-partial message never survives past the final result.
+---@param text string
+---@param positions neotest.Position[]
+---@param streamed table<string, { status: string, short: string? }>
+---@return table<string, neotest.Result>
+local function nix_unit_stream_results(text, positions, streamed)
+  local complete = text:match("^(.*\n)")
+  if complete == nil then
+    return {}
+  end
+
+  local entries = M.parse_nix_unit(complete)
+  local entry_results = nix_unit_entry_results(entries, positions)
+
+  local changed = {}
+  for id, result in pairs(entry_results) do
+    local previous = streamed[id]
+    if previous == nil or previous.status ~= result.status or previous.short ~= result.short then
+      changed[id] = result
+    end
+    streamed[id] = { status = result.status, short = result.short }
+  end
+
+  return changed
+end
+
 ---@param spec neotest.RunSpec
 ---@param tree neotest.Tree
 ---@return fun(output_stream: fun(): string?): fun(): table<string, neotest.Result>?
@@ -894,6 +948,9 @@ function M.stream(spec, tree)
     local traceback_count = 0
     local positions = test_positions(tree)
     local target = vm_target(tree, spec)
+    local is_nix_unit = spec.context ~= nil and spec.context.runner == "nix-unit"
+    ---@type table<string, { status: string, short: string? }>
+    local streamed_nix_unit = {}
 
     return function()
       while true do
@@ -905,22 +962,30 @@ function M.stream(spec, tree)
         table.insert(output, chunk)
         local text = table.concat(output)
         local root = spec.cwd or uv.cwd() or "."
-        local parsed_errors = M.parse_errors(text, root)
-        local stream_results = {}
 
-        for index = parsed_error_count + 1, #parsed_errors do
-          local parsed = parsed_errors[index]
-          add_error(stream_results, result_id_for_error(tree, spec, parsed, positions), parsed)
-        end
-        parsed_error_count = #parsed_errors
-
-        traceback_count = add_vm_tracebacks(stream_results, target, text, traceback_count + 1)
-
-        if not vim.tbl_isempty(stream_results) then
-          for _, result in pairs(stream_results) do
-            result.short = text
+        if is_nix_unit then
+          local stream_results = nix_unit_stream_results(text, positions, streamed_nix_unit)
+          if not vim.tbl_isempty(stream_results) then
+            return paths.translate_result_paths(stream_results, root)
           end
-          return paths.translate_result_paths(stream_results, root)
+        else
+          local parsed_errors = M.parse_errors(text, root)
+          local stream_results = {}
+
+          for index = parsed_error_count + 1, #parsed_errors do
+            local parsed = parsed_errors[index]
+            add_error(stream_results, result_id_for_error(tree, spec, parsed, positions), parsed)
+          end
+          parsed_error_count = #parsed_errors
+
+          traceback_count = add_vm_tracebacks(stream_results, target, text, traceback_count + 1)
+
+          if not vim.tbl_isempty(stream_results) then
+            for _, result in pairs(stream_results) do
+              result.short = text
+            end
+            return paths.translate_result_paths(stream_results, root)
+          end
         end
       end
     end

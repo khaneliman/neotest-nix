@@ -641,10 +641,12 @@ function M.build_spec(args, opts)
       type = position.type,
     },
   }
-  -- nix-unit reports per-attribute results that the final pass parses in full;
-  -- the streaming nix-error scanner only applies to plain `nix` runs. The
-  -- interactive driver session is a live REPL, not build output to scan.
-  if runner ~= "nix-unit" and not vm_interactive then
+  -- nix-unit also streams incrementally: it prints a ✅/❌ marker per attribute
+  -- as each test in the suite finishes, so `results.stream` reports individual
+  -- positions as they complete rather than waiting for the whole run. The
+  -- interactive driver session is a live REPL, not output to scan, so it is
+  -- still excluded.
+  if not vm_interactive then
     run_spec.stream = results.stream(run_spec, tree)
   end
 
