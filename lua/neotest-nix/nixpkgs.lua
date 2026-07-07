@@ -163,6 +163,7 @@ function M.resolve_root(file_path, opts)
   return nil
 end
 
+---@type table<string, table<string, boolean>>
 local is_root_cache = {}
 
 ---Whether an adapter root is a Nixpkgs root in nixpkgs mode. Used by the
@@ -178,7 +179,14 @@ function M.is_root(root, opts)
     is_root_cache[root] = root_cache
   end
 
-  local mode_key = mode == nil and "nil" or mode
+  local mode_key
+  if mode == nil then
+    mode_key = "auto"
+  elseif mode then
+    mode_key = "true"
+  else
+    mode_key = "false"
+  end
   local cached = root_cache[mode_key]
   if cached ~= nil then
     return cached
