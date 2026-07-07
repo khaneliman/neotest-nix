@@ -134,6 +134,30 @@ describe("runtests", function()
       assert.are.equal("file", run.context.type)
     end)
 
+    it("threads configured nix_bin and nix_extra_args into a zero-arg file", function()
+      -- build_spec only reads id/path/type; range/total_range are always set
+      -- by real tree-sitter discovery but aren't needed by the code under test.
+      ---@diagnostic disable-next-line: missing-fields
+      local run = runtests.build_spec({
+        id = zero_arg_fixture,
+        name = "default.nix",
+        path = zero_arg_fixture,
+        type = "file",
+      }, fixtures, nil, { nix_bin = "/opt/nix/bin/nix", nix_extra_args = { "-L" } })
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.same({
+        "/opt/nix/bin/nix-instantiate",
+        "-L",
+        "--eval",
+        "--strict",
+        "--json",
+        zero_arg_fixture,
+      }, run.command)
+      assert.are.equal("/opt/nix/bin/nix", run.context.nix_bin)
+    end)
+
     it("builds an impure nix eval command applying a defaulted function file", function()
       -- build_spec only reads id/path/type; range/total_range are always set
       -- by real tree-sitter discovery but aren't needed by the code under test.
@@ -171,6 +195,41 @@ describe("runtests", function()
       assert.is_truthy(expr:find(eval.nix_string_literal(function_fixture), 1, true))
       assert.is_truthy(expr:find("{ }", 1, true))
       assert.are.equal("nix-eval", run.context.runner)
+    end)
+
+    it("threads configured nix_bin and nix_extra_args into function files", function()
+      -- build_spec only reads id/path/type; range/total_range are always set
+      -- by real tree-sitter discovery but aren't needed by the code under test.
+      ---@diagnostic disable-next-line: missing-fields
+      local run = runtests.build_spec({
+        id = function_fixture,
+        name = "default.nix",
+        path = function_fixture,
+        type = "file",
+      }, fixtures, nil, { nix_bin = "nix-custom", nix_extra_args = { "--show-trace" } })
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.same({
+        "nix-custom",
+        "eval",
+        "--impure",
+        "--json",
+        "--extra-experimental-features",
+        "nix-command flakes",
+        "--show-trace",
+        "--expr",
+      }, {
+        run.command[1],
+        run.command[2],
+        run.command[3],
+        run.command[4],
+        run.command[5],
+        run.command[6],
+        run.command[7],
+        run.command[8],
+      })
+      assert.are.equal("nix-custom", run.context.nix_bin)
     end)
 
     it("honours named neotest strategies by omitting the custom strategy", function()

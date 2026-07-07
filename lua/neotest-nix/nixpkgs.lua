@@ -762,8 +762,9 @@ local eval_names_cache = {}
 ---@param file_path string
 ---@param root string
 ---@param attr string
+---@param opts neotest-nix.Config?
 ---@return string[]?
-local function eval_test_names(file_path, root, attr)
+local function eval_test_names(file_path, root, attr, opts)
   local stat = uv.fs_stat(file_path)
   local mtime = (stat ~= nil and stat.mtime ~= nil) and stat.mtime.sec or 0
 
@@ -774,7 +775,7 @@ local function eval_test_names(file_path, root, attr)
 
   local log = require("neotest-nix.log")
   local start = log.enabled() and uv.hrtime() or nil
-  local names = require("neotest-nix.eval").nixpkgs_test_names(root, attr)
+  local names = require("neotest-nix.eval").nixpkgs_test_names(root, attr, opts)
   if start ~= nil then
     log.debug(
       ("eval tests %s -> %s %.2fms"):format(
@@ -861,7 +862,7 @@ local function by_name_positions(file_path, root, opts)
   -- is_test_file): the entries are computed (e.g. `callPackages ./tests`). Fall
   -- back to a legacy eval to enumerate them, when the user opts in.
   if #order == 0 and opts ~= nil and opts.discover_nixpkgs_eval_tests then
-    local names = eval_test_names(file_path, root, attr)
+    local names = eval_test_names(file_path, root, attr, opts)
     if names ~= nil then
       for _, name in ipairs(names) do
         ranges[name] = tests_range or { 0, 0, 0, 0 }
@@ -1033,16 +1034,64 @@ function M.discover_positions(file_path, root, opts)
   return nil
 end
 
+---Derive the legacy `nix-build`/`nix-instantiate` binary name from the
+---configured `nix_bin`. These are separate executables from the `nix` CLI
+---itself (pre-flakes commands, kept here because Nixpkgs-mode discovery
+---evaluates the working tree in place instead of copying it to the store). A
+---bare command name (the default `"nix"`) leaves the legacy binaries under
+---their own literal names, assumed to already resolve on `PATH` the same way
+---`nix` does. A path (anything containing a `/`) is assumed to point at a
+---nonstandard install where the siblings live in the same directory, so only
+---the basename is substituted: `nix_bin = "/opt/nix/bin/nix"` yields
+---`/opt/nix/bin/nix-build`. This is the simpler of the two options that still
+---covers the "nonstandard PATH" case the config exists for; a separate legacy
+---bin knob would let a user point `nix-build` somewhere unrelated to `nix_bin`,
+---but nothing in this adapter's supported setups needs that.
+---@param opts neotest-nix.Config?
+---@param suffix "build"|"instantiate"
+---@return string
+function M.legacy_bin(opts, suffix)
+  local bin = (opts and opts.nix_bin) or "nix"
+  if not bin:find("/", 1, true) then
+    return "nix-" .. suffix
+  end
+  return vim.fs.joinpath(vim.fs.dirname(bin), "nix-" .. suffix)
+end
+
 ---Legacy command and result runner for a Nixpkgs position. `--no-out-link`
 ---avoids littering `result` symlinks (which the directory filter also ignores).
 ---All commands are legacy (no flakes, evaluate the working tree in place).
+---`opts.nix_extra_args` is spliced right after the binary name (these legacy
+---commands have no `--extra-experimental-features`-style flag of their own to
+---anchor after) and before the subcommand-specific arguments (`-A`, `--eval`,
+---the file/attribute path).
 ---@param position neotest-nix.Position
+---@param opts neotest-nix.Config?
 ---@return string[] command, string runner
-function M.build_command(position)
+function M.build_command(position, opts)
+  opts = opts or {}
+
+  ---@param bin string
+  ---@param rest string[]
+  ---@return string[]
+  local function command_with(bin, rest)
+    local command = { bin }
+    if opts.nix_extra_args ~= nil then
+      vim.list_extend(command, opts.nix_extra_args)
+    end
+    vim.list_extend(command, rest)
+    return command
+  end
+
   if position.nixpkgs_file_build ~= nil then
-    return { "nix-build", position.nixpkgs_file_build, "--no-out-link" }, "nix"
+    return command_with(
+      M.legacy_bin(opts, "build"),
+      { position.nixpkgs_file_build, "--no-out-link" }
+    ),
+      "nix"
   end
   if position.nixpkgs_file_eval ~= nil then
+    local instantiate_bin = M.legacy_bin(opts, "instantiate")
     if position.nixpkgs_eval_test ~= nil then
       local name =
         require("neotest-nix.eval").nix_string_literal(vim.json.encode(position.nixpkgs_eval_test))
@@ -1053,14 +1102,19 @@ let
 in
 builtins.filter (failure: (failure.name or null) == name) failures
 ]]):format(position.nixpkgs_file_eval, name)
-      return { "nix-instantiate", "--eval", "--strict", "--json", "--expr", expr }, "nix-eval"
+      return command_with(instantiate_bin, { "--eval", "--strict", "--json", "--expr", expr }),
+        "nix-eval"
     end
-    return { "nix-instantiate", "--eval", "--strict", "--json", position.nixpkgs_file_eval },
+    return command_with(
+      instantiate_bin,
+      { "--eval", "--strict", "--json", position.nixpkgs_file_eval }
+    ),
       "nix-eval"
   end
   -- `nixpkgs_attr` segments are quoted at construction (join_attr_path), so the
   -- dotted string is already a valid attrpath for `-A`.
-  return { "nix-build", "-A", position.nixpkgs_attr, "--no-out-link" }, "nix"
+  return command_with(M.legacy_bin(opts, "build"), { "-A", position.nixpkgs_attr, "--no-out-link" }),
+    "nix"
 end
 
 function M.clear_cache()

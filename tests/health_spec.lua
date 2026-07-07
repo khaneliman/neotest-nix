@@ -192,4 +192,114 @@ describe("health config check", function()
     check_with_opts({})
     assert.is_true(any_match(recorded.warn, "`nix%-unit` not found on PATH"))
   end)
+
+  ---@param stdout string
+  ---@param code integer?
+  local function stub_nix_version(stdout, code)
+    local real_system = vim.system
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(_command, _opts)
+      return {
+        wait = function()
+          return { code = code or 0, stdout = stdout, stderr = "" }
+        end,
+      }
+    end
+    finally(function()
+      vim.system = real_system
+    end)
+  end
+
+  it("reports the nix version when it meets the minimum", function()
+    stub_nix_version("nix (Nix) 2.18.1\n")
+
+    check_with_opts({})
+
+    assert.is_true(any_match(recorded.ok, "`nix` 2%.18"))
+  end)
+
+  it("errors when the nix version is older than the minimum", function()
+    stub_nix_version("nix (Nix) 2.3.0\n")
+
+    check_with_opts({})
+
+    assert.is_true(any_match(recorded.error, "older than the minimum supported version"))
+  end)
+
+  it("warns when nix --version output cannot be parsed", function()
+    stub_nix_version("unexpected output with no version\n")
+
+    check_with_opts({})
+
+    assert.is_true(any_match(recorded.warn, "could not parse"))
+  end)
+
+  it("honours a configured nix_bin for the version check", function()
+    local real_system = vim.system
+    local captured
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(command)
+      captured = command
+      return {
+        wait = function()
+          return { code = 0, stdout = "nix (Nix) 2.18.1\n", stderr = "" }
+        end,
+      }
+    end
+
+    local real_executable = vim.fn.executable
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.fn.executable = function(name)
+      if name == "/opt/nix/bin/nix" then
+        return 1
+      end
+      return real_executable(name)
+    end
+
+    -- A single finally covering both stubs: this busted setup only keeps the
+    -- last `finally` registered per test, so two separate calls here would
+    -- silently drop the vim.system restore and leak the stub into later specs.
+    finally(function()
+      vim.system = real_system
+      vim.fn.executable = real_executable
+    end)
+
+    check_with_opts({ nix_bin = "/opt/nix/bin/nix" })
+
+    assert.are.equal("/opt/nix/bin/nix", captured[1])
+  end)
+
+  it("warns when git is not on PATH", function()
+    local real_executable = vim.fn.executable
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.fn.executable = function(name)
+      if name == "git" then
+        return 0
+      end
+      return real_executable(name)
+    end
+    finally(function()
+      vim.fn.executable = real_executable
+    end)
+
+    check_with_opts({})
+    assert.is_true(any_match(recorded.warn, "`git` not found on PATH"))
+  end)
+
+  it("reports git on PATH when present", function()
+    local real_executable = vim.fn.executable
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.fn.executable = function(name)
+      if name == "git" then
+        return 1
+      end
+      return real_executable(name)
+    end
+    finally(function()
+      vim.fn.executable = real_executable
+    end)
+
+    check_with_opts({})
+    assert.is_true(any_match(recorded.ok, "`git` on PATH"))
+  end)
 end)

@@ -9,6 +9,43 @@ local default_eval_outputs = {
   { attr = "checks" },
 }
 
+---@param opts neotest-nix.Config?
+---@return string
+local function nix_bin(opts)
+  return (opts and opts.nix_bin) or "nix"
+end
+
+---@param command string[]
+---@param opts neotest-nix.Config?
+local function append_nix_extra_args(command, opts)
+  if opts and opts.nix_extra_args ~= nil then
+    vim.list_extend(command, opts.nix_extra_args)
+  end
+end
+
+-- Duplicated from nixpkgs.lua's `M.legacy_bin` (see its docs for the
+-- derivation rationale): nixpkgs.lua requires this module lazily inside a
+-- function, so requiring it back here at module load time would create a
+-- require cycle. The logic is a few lines; keeping it local avoids that.
+---@param opts neotest-nix.Config?
+---@param suffix "build"|"instantiate"
+---@return string
+local function legacy_bin(opts, suffix)
+  local bin = nix_bin(opts)
+  if not bin:find("/", 1, true) then
+    return "nix-" .. suffix
+  end
+  return vim.fs.joinpath(vim.fs.dirname(bin), "nix-" .. suffix)
+end
+
+---@param root string
+---@param opts neotest-nix.Config?
+---@return string
+local function command_cache_key(root, opts)
+  local extra = (opts and opts.nix_extra_args) or {}
+  return root .. "\0" .. nix_bin(opts) .. "\0" .. table.concat(extra, "\0")
+end
+
 ---@type table<string, string>
 local current_system_cache = {}
 
@@ -60,15 +97,18 @@ local function filter_names(names, pattern)
 end
 
 ---@param root string
+---@param opts neotest-nix.Config?
 ---@return string?
-function M.current_system(root)
-  if current_system_cache[root] ~= nil then
-    return current_system_cache[root]
+function M.current_system(root, opts)
+  local cache_key = command_cache_key(root, opts)
+  if current_system_cache[cache_key] ~= nil then
+    return current_system_cache[cache_key]
   end
 
   -- Current system: cheap impure builtin, does not evaluate the flake.
-  local command = { "nix", "eval", "--impure", "--raw" }
+  local command = { nix_bin(opts), "eval", "--impure", "--raw" }
   vim.list_extend(command, nix_command_features)
+  append_nix_extra_args(command, opts)
   vim.list_extend(command, { "--expr", "builtins.currentSystem" })
 
   local result = run(command, root)
@@ -78,18 +118,19 @@ function M.current_system(root)
   end
 
   local system = vim.trim(result.stdout)
-  current_system_cache[root] = system
+  current_system_cache[cache_key] = system
   return system
 end
 
 ---Enumerate flake outputs per system by evaluating the flake.
 ---@param root string
 ---@param specs neotest-nix.EvalOutput[]?
+---@param opts neotest-nix.Config?
 ---@return { system: string, outputs: { attr: string, names: string[] }[] }?
-function M.eval_outputs(root, specs)
+function M.eval_outputs(root, specs, opts)
   specs = specs or default_eval_outputs
 
-  local system = M.current_system(root)
+  local system = M.current_system(root, opts)
   if system == nil then
     return nil
   end
@@ -100,8 +141,9 @@ function M.eval_outputs(root, specs)
     -- <attr>.<system> simply exits non-zero and is skipped.
     -- --no-write-lock-file: discovery must not mutate the repo by locking the
     -- flake on disk.
-    local names_command = { "nix", "eval", "--json", "--no-write-lock-file" }
+    local names_command = { nix_bin(opts), "eval", "--json", "--no-write-lock-file" }
     vim.list_extend(names_command, nix_command_features)
+    append_nix_extra_args(names_command, opts)
     vim.list_extend(
       names_command,
       { "--apply", "builtins.attrNames", (".#%s.%s"):format(output_spec.attr, system) }
@@ -135,15 +177,17 @@ end
 ---@type table<string, string>
 local nix_unit_flake_cache = {}
 
----Stable cache key from the flake root and the suite's test names. The names
----are sorted into a copy so discovery order does not change the key.
+---Stable cache key from the flake root, command-affecting config, and the
+---suite's test names. The names are sorted into a copy so discovery order does
+---not change the key.
 ---@param root string
 ---@param test_names string[]
+---@param opts neotest-nix.Config?
 ---@return string
-local function flake_cache_key(root, test_names)
+local function flake_cache_key(root, test_names, opts)
   local sorted = vim.deepcopy(test_names)
   table.sort(sorted)
-  return root .. "\0" .. table.concat(sorted, "\0")
+  return command_cache_key(root, opts) .. "\0" .. table.concat(sorted, "\0")
 end
 
 ---Render a Lua string as a Nix double-quoted string literal. JSON encoding
@@ -222,13 +266,14 @@ local nix_unit_flake_preference = { "tests", "libTests", "unitTests" }
 ---e.g. ".#tests", or nil when nothing matches.
 ---@param root string
 ---@param test_names string[]
+---@param opts neotest-nix.Config?
 ---@return string?
-function M.detect_nix_unit_flake(root, test_names)
+function M.detect_nix_unit_flake(root, test_names, opts)
   if test_names == nil or #test_names == 0 then
     return nil
   end
 
-  local cache_key = flake_cache_key(root, test_names)
+  local cache_key = flake_cache_key(root, test_names, opts)
   if nix_unit_flake_cache[cache_key] ~= nil then
     return nix_unit_flake_cache[cache_key]
   end
@@ -236,8 +281,9 @@ function M.detect_nix_unit_flake(root, test_names)
   -- --impure: getFlake refuses an unlocked local flake reference otherwise.
   -- --no-write-lock-file: discovery must not mutate the repo by locking the
   -- flake on disk.
-  local command = { "nix", "eval", "--impure", "--json", "--no-write-lock-file" }
+  local command = { nix_bin(opts), "eval", "--impure", "--json", "--no-write-lock-file" }
   vim.list_extend(command, nix_command_features)
+  append_nix_extra_args(command, opts)
   vim.list_extend(command, { "--expr", M.nix_unit_flake_expr(test_names) })
 
   local result = run(command, root)
@@ -275,8 +321,9 @@ end
 ---back to a single file node.
 ---@param root string
 ---@param attr string Top-level package attribute (e.g. "hello").
+---@param opts neotest-nix.Config?
 ---@return string[]?
-function M.nixpkgs_test_names(root, attr)
+function M.nixpkgs_test_names(root, attr, opts)
   -- Mirror `nix-build -A`'s view of the tree: import the root expression and
   -- auto-call it when it is a function (Nixpkgs' default.nix takes args), then
   -- list `<attr>.tests`. `./.` resolves against the run cwd (the root), so this
@@ -289,14 +336,17 @@ in
   builtins.attrNames pkgs.%s.tests
 ]]):format("${" .. M.nix_string_literal(attr) .. "}")
 
-  local command = {
-    "nix-instantiate",
+  -- Legacy command (no --extra-experimental-features to anchor after), so
+  -- nix_extra_args is spliced right after the binary name.
+  local command = { legacy_bin(opts, "instantiate") }
+  append_nix_extra_args(command, opts)
+  vim.list_extend(command, {
     "--eval",
     "--strict",
     "--json",
     "--expr",
     expr,
-  }
+  })
 
   local result = run(command, root)
   if result.code ~= 0 or result.stdout == nil or result.stdout == "" then
@@ -446,6 +496,11 @@ function M.merge_outputs(tree, system, outputs)
   return Tree.from_list(list, function(data)
     return data.id
   end)
+end
+
+function M.clear_cache()
+  current_system_cache = {}
+  nix_unit_flake_cache = {}
 end
 
 return M

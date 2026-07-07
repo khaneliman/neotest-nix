@@ -36,6 +36,31 @@ local nix_command_features = {
   "nix-command flakes",
 }
 
+---@param opts neotest-nix.Config?
+---@return string
+local function nix_bin(opts)
+  return (opts and opts.nix_bin) or "nix"
+end
+
+---@param opts neotest-nix.Config?
+---@param suffix "build"|"instantiate"
+---@return string
+local function legacy_bin(opts, suffix)
+  local bin = nix_bin(opts)
+  if not bin:find("/", 1, true) then
+    return "nix-" .. suffix
+  end
+  return vim.fs.joinpath(vim.fs.dirname(bin), "nix-" .. suffix)
+end
+
+---@param command string[]
+---@param opts neotest-nix.Config?
+local function append_nix_extra_args(command, opts)
+  if opts and opts.nix_extra_args ~= nil then
+    vim.list_extend(command, opts.nix_extra_args)
+  end
+end
+
 ---Read `value` as file content when it names an existing file, otherwise
 ---treat it as raw source already. Lets `is_runtests_file` accept either a
 ---path or in-memory content, which keeps unit tests free of temp files.
@@ -123,8 +148,9 @@ end
 ---Build the whole-suite eval command for a `lib.runTests` file.
 ---@param file_path string
 ---@param source string
+---@param opts neotest-nix.Config?
 ---@return string[]
-local function eval_command(file_path, source)
+local function eval_command(file_path, source, opts)
   if starts_with_attrset_function(source) then
     -- `nix-instantiate --eval` on a function prints its representation, not
     -- the applied result, so the function is applied explicitly. `--impure`
@@ -133,13 +159,17 @@ local function eval_command(file_path, source)
     local expr = ("(import (builtins.path { path = %s; })) { }"):format(
       eval.nix_string_literal(file_path)
     )
-    local command = { "nix", "eval", "--impure", "--json" }
+    local command = { nix_bin(opts), "eval", "--impure", "--json" }
     vim.list_extend(command, nix_command_features)
+    append_nix_extra_args(command, opts)
     vim.list_extend(command, { "--expr", expr })
     return command
   end
 
-  return { "nix-instantiate", "--eval", "--strict", "--json", file_path }
+  local command = { legacy_bin(opts, "instantiate") }
+  append_nix_extra_args(command, opts)
+  vim.list_extend(command, { "--eval", "--strict", "--json", file_path })
+  return command
 end
 
 ---@param args_strategy string|table|neotest.Strategy|nil
@@ -160,10 +190,10 @@ end
 ---@param position neotest-nix.Position
 ---@param root string
 ---@param extra_args string[]?
----@param _opts neotest-nix.Config?
+---@param opts neotest-nix.Config?
 ---@param args_strategy string|table|neotest.Strategy|nil
 ---@return neotest.RunSpec?
-function M.build_spec(position, root, extra_args, _opts, args_strategy)
+function M.build_spec(position, root, extra_args, opts, args_strategy)
   if position == nil or type(position.path) ~= "string" then
     return nil
   end
@@ -173,7 +203,7 @@ function M.build_spec(position, root, extra_args, _opts, args_strategy)
     return nil
   end
 
-  local command = eval_command(position.path, source)
+  local command = eval_command(position.path, source, opts)
   if extra_args ~= nil then
     vim.list_extend(command, extra_args)
   end
@@ -184,6 +214,7 @@ function M.build_spec(position, root, extra_args, _opts, args_strategy)
     strategy = run_strategy(args_strategy),
     context = {
       attr = position.path,
+      nix_bin = nix_bin(opts),
       path = position.path,
       pos_id = position.id,
       runner = "nix-eval",

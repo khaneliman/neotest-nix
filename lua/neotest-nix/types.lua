@@ -77,6 +77,10 @@
 ---      nixpkgs_mode = nil,
 ---      discover_nixpkgs_eval_tests = false,
 ---      vm_interactive = false,
+---      nix_bin = "nix",
+---      nix_unit_bin = "nix-unit",
+---      nix_extra_args = nil,
+---      nix_unit_extra_args = nil,
 ---    })
 ---<
 ---                                    *neotest-nix-config-parser_runtime_paths*
@@ -157,6 +161,38 @@
 ---    forwarded to the underlying build; and a derivation with more than one
 ---    output path is not supported (the captured path is used as-is, so extra
 ---    lines from `--print-out-paths` corrupt it).
+---
+---                                                  *neotest-nix-config-nix_bin*
+---`nix_bin`                     `string?` (default `"nix"`)
+---    Executable used for every `nix` CLI invocation (`nix build`, `nix eval`,
+---    `nix flake check`). Also determines the legacy `nix-build`/`nix-instantiate`
+---    binaries used by Nixpkgs-mode discovery (see
+---    |neotest-nix-config-nixpkgs_mode|): a bare command name (the default) leaves
+---    them under their own literal names on `PATH`; a path containing a `/` (e.g.
+---    `/opt/nix/bin/nix`) is assumed to have them alongside it, so the basename is
+---    substituted (`/opt/nix/bin/nix-build`). Set this for a `nix` that is not on
+---    `PATH` under its default name.
+---
+---                                             *neotest-nix-config-nix_unit_bin*
+---`nix_unit_bin`                `string?` (default `"nix-unit"`)
+---    Executable used for every `nix-unit` invocation. Set this for a `nix-unit`
+---    that is not on `PATH` under its default name.
+---
+---                                           *neotest-nix-config-nix_extra_args*
+---`nix_extra_args`              `string[]?` (default `nil`)
+---    Extra arguments appended to every `nix`-family command this adapter runs
+---    (`nix build`, `nix eval`, `nix flake check`, and the legacy
+---    `nix-build`/`nix-instantiate` commands used in Nixpkgs mode), right after
+---    the adapter's own required flags and before the command's subcommand-
+---    specific arguments (e.g. `-A`, `--eval`, the installable/attribute path).
+---    Useful for e.g. a remote builder (`{ "--option", "builders", "..." }`) or
+---    build logs (`{ "-L" }`).
+---
+---                                      *neotest-nix-config-nix_unit_extra_args*
+---`nix_unit_extra_args`         `string[]?` (default `nil`)
+---    Extra arguments appended to every `nix-unit` command, in the same position
+---    (after `--extra-experimental-features`, before `--flake`/`--expr` and its
+---    value).
 ---@brief ]]
 
 ---@mod neotest-nix.discovery Discovery
@@ -232,9 +268,11 @@
 ---@mod neotest-nix.health Health
 ---@brief [[
 ---Run |:checkhealth| neotest-nix to confirm the Neovim version, the `neotest`
----and `nvim-nio` plugins, the `nix` and `nix-unit` executables, and the `nix`
----tree-sitter grammar are all in place. It also reports unknown or wrong-typed
----configuration keys.
+---and `nvim-nio` plugins, the `nix` and `nix-unit` executables (honouring
+---`nix_bin`/`nix_unit_bin`), a minimum `nix` version, and the `nix` tree-sitter
+---grammar are all in place. It also warns when `git` is missing (see
+---|neotest-nix.limitations| for why nix-unit and `builtins.getFlake` need it),
+---and reports unknown or wrong-typed configuration keys.
 ---@brief ]]
 
 -- Annotation-only module: nothing requires it at runtime. It is the single
@@ -264,7 +302,10 @@ local M = {}
 ---@field nix_unit_flakes? neotest-nix.NixUnitFlake[] Run wrapped nix-unit suites via a flake installable.
 ---@field nixpkgs_mode? boolean Force (true) or disable (false) legacy Nixpkgs handling; nil auto-detects.
 ---@field discover_nixpkgs_eval_tests? boolean Eval a Nixpkgs package to enumerate computed passthru.tests.
----@field vm_interactive? boolean Run a single VM-test check's `driverInteractive` for
----interactive debugging instead of the normal build.
+---@field vm_interactive? boolean Run a single VM-test check's driverInteractive for interactive debugging.
+---@field nix_bin? string Executable for nix CLI invocations (default "nix"); also derives the legacy binaries.
+---@field nix_unit_bin? string Executable for nix-unit invocations (default "nix-unit").
+---@field nix_extra_args? string[] Extra args appended to every nix-family command (nix and legacy binaries).
+---@field nix_unit_extra_args? string[] Extra args appended to every nix-unit command.
 
 return M

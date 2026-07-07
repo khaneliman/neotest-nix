@@ -155,6 +155,10 @@ describe("config validation", function()
         nix_unit_flakes = { { path = "lib/tests", flake = ".#tests" } },
         nixpkgs_mode = true,
         discover_nixpkgs_eval_tests = true,
+        nix_bin = "/opt/nix/bin/nix",
+        nix_unit_bin = "/opt/nix/bin/nix-unit",
+        nix_extra_args = { "--option", "builders", "" },
+        nix_unit_extra_args = { "-L" },
       })
     end)
   end)
@@ -226,6 +230,56 @@ describe("config validation", function()
     })
 
     assert.is_truthy(err:find("nix_unit_flakes[1].flake", 1, true))
+  end)
+
+  it("rejects a non-string nix_bin", function()
+    local adapter = require("neotest-nix")
+    assert.has_error(function()
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      adapter.setup({ nix_bin = 42 })
+    end)
+  end)
+
+  it("rejects a non-string nix_unit_bin", function()
+    local adapter = require("neotest-nix")
+    assert.has_error(function()
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      adapter.setup({ nix_unit_bin = true })
+    end)
+  end)
+
+  it("rejects a non-table nix_extra_args", function()
+    local adapter = require("neotest-nix")
+    assert.has_error(function()
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      adapter.setup({ nix_extra_args = "-L" })
+    end)
+  end)
+
+  it("rejects a non-table nix_unit_extra_args", function()
+    local adapter = require("neotest-nix")
+    assert.has_error(function()
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      adapter.setup({ nix_unit_extra_args = "-L" })
+    end)
+  end)
+
+  it("rejects non-string nix_extra_args entries", function()
+    local err = setup_error({
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      nix_extra_args = { 42 },
+    })
+
+    assert.is_truthy(err:find("nix_extra_args[1]", 1, true))
+  end)
+
+  it("rejects non-string nix_unit_extra_args entries", function()
+    local err = setup_error({
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      nix_unit_extra_args = { false },
+    })
+
+    assert.is_truthy(err:find("nix_unit_extra_args[1]", 1, true))
   end)
 end)
 

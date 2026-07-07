@@ -82,7 +82,7 @@ function M.discover_positions(file_path)
 
   if opts.discover_eval_checks and vim.fs.basename(file_path) == "flake.nix" then
     local root = discover.root(file_path)
-    local discovered = root ~= nil and eval.eval_outputs(root, opts.eval_outputs) or nil
+    local discovered = root ~= nil and eval.eval_outputs(root, opts.eval_outputs, opts) or nil
     if discovered ~= nil and #discovered.outputs > 0 then
       tree = eval.merge_outputs(tree, discovered.system, discovered.outputs)
     end
@@ -102,10 +102,26 @@ local function validate(opts)
   vim.validate("nixpkgs_mode", opts.nixpkgs_mode, "boolean", true)
   vim.validate("discover_nixpkgs_eval_tests", opts.discover_nixpkgs_eval_tests, "boolean", true)
   vim.validate("vm_interactive", opts.vm_interactive, "boolean", true)
+  vim.validate("nix_bin", opts.nix_bin, "string", true)
+  vim.validate("nix_unit_bin", opts.nix_unit_bin, "string", true)
+  vim.validate("nix_extra_args", opts.nix_extra_args, "table", true)
+  vim.validate("nix_unit_extra_args", opts.nix_unit_extra_args, "table", true)
 
   if opts.parser_runtime_paths ~= nil then
     for index, path in ipairs(opts.parser_runtime_paths) do
       vim.validate(("parser_runtime_paths[%d]"):format(index), path, "string")
+    end
+  end
+
+  if opts.nix_extra_args ~= nil then
+    for index, arg in ipairs(opts.nix_extra_args) do
+      vim.validate(("nix_extra_args[%d]"):format(index), arg, "string")
+    end
+  end
+
+  if opts.nix_unit_extra_args ~= nil then
+    for index, arg in ipairs(opts.nix_unit_extra_args) do
+      vim.validate(("nix_unit_extra_args[%d]"):format(index), arg, "string")
     end
   end
 
@@ -136,6 +152,7 @@ function M.setup(opts)
   validate(opts)
   M._opts = opts
   require("neotest-nix.discover").clear_cache()
+  require("neotest-nix.eval").clear_cache()
   require("neotest-nix.nixpkgs").clear_cache()
   ---@diagnostic disable-next-line: return-type-mismatch
   return M

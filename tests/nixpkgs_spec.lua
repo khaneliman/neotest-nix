@@ -544,5 +544,54 @@ describe("nixpkgs", function()
       assert.is_truthy(command[6]:find("builtins.filter", 1, true))
       assert.is_truthy(command[6]:find("testAlpha", 1, true))
     end)
+
+    it("splices nix_extra_args right after the binary name, before -A", function()
+      local command = nixpkgs.build_command(
+        { nixpkgs_attr = "hello.tests.simple" },
+        { nix_extra_args = { "-L", "--show-trace" } }
+      )
+      assert.same(
+        { "nix-build", "-L", "--show-trace", "-A", "hello.tests.simple", "--no-out-link" },
+        command
+      )
+    end)
+
+    it("derives nix-build/nix-instantiate alongside a path-shaped nix_bin", function()
+      local build_command = nixpkgs.build_command(
+        { nixpkgs_file_build = "lib/tests/release.nix" },
+        { nix_bin = "/opt/nix/bin/nix" }
+      )
+      assert.same(
+        { "/opt/nix/bin/nix-build", "lib/tests/release.nix", "--no-out-link" },
+        build_command
+      )
+
+      local eval_command = nixpkgs.build_command(
+        { nixpkgs_file_eval = "lib/tests/misc.nix" },
+        { nix_bin = "/opt/nix/bin/nix" }
+      )
+      assert.same(
+        { "/opt/nix/bin/nix-instantiate", "--eval", "--strict", "--json", "lib/tests/misc.nix" },
+        eval_command
+      )
+    end)
+  end)
+
+  describe("legacy_bin", function()
+    it("keeps the literal name for a bare (or unset) nix_bin", function()
+      assert.are.equal("nix-build", nixpkgs.legacy_bin({ nix_bin = "nix" }, "build"))
+      assert.are.equal("nix-instantiate", nixpkgs.legacy_bin(nil, "instantiate"))
+    end)
+
+    it("substitutes the basename alongside a path-shaped nix_bin", function()
+      assert.are.equal(
+        "/opt/nix/bin/nix-build",
+        nixpkgs.legacy_bin({ nix_bin = "/opt/nix/bin/nix" }, "build")
+      )
+      assert.are.equal(
+        "/opt/nix/bin/nix-instantiate",
+        nixpkgs.legacy_bin({ nix_bin = "/opt/nix/bin/nix" }, "instantiate")
+      )
+    end)
   end)
 end)

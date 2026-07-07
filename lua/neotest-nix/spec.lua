@@ -47,6 +47,40 @@ local function with_extra_args(command, extra_args)
   return result
 end
 
+---@param opts neotest-nix.Config?
+---@return string
+local function nix_bin(opts)
+  return (opts and opts.nix_bin) or "nix"
+end
+
+---@param opts neotest-nix.Config?
+---@return string
+local function nix_unit_bin(opts)
+  return (opts and opts.nix_unit_bin) or "nix-unit"
+end
+
+-- Splices the adapter's configured `nix_extra_args`/`nix_unit_extra_args`
+-- right after the command's own required flags (the `--extra-experimental-
+-- features` pair above) and before its subcommand-specific arguments (`-A`,
+-- `--eval`, `--flake`/`--expr`, the installable/attribute path). This is
+-- distinct from `with_extra_args` above: that one appends neotest's own
+-- per-run `args.extra_args` at the very end of the finished command.
+---@param command string[]
+---@param opts neotest-nix.Config?
+local function append_nix_extra_args(command, opts)
+  if opts and opts.nix_extra_args ~= nil then
+    vim.list_extend(command, opts.nix_extra_args)
+  end
+end
+
+---@param command string[]
+---@param opts neotest-nix.Config?
+local function append_nix_unit_extra_args(command, opts)
+  if opts and opts.nix_unit_extra_args ~= nil then
+    vim.list_extend(command, opts.nix_unit_extra_args)
+  end
+end
+
 ---@param tree neotest.Tree
 ---@return neotest.Position[]
 local function position_path(tree)
@@ -231,10 +265,12 @@ end
 ---wrapping check, this prints per-attribute results to stdout so individual
 ---test attributes can pass or fail independently.
 ---@param flake string
+---@param opts neotest-nix.Config?
 ---@return string[]
-local function nix_unit_flake_command(flake)
-  local command = { "nix-unit" }
+local function nix_unit_flake_command(flake, opts)
+  local command = { nix_unit_bin(opts) }
   vim.list_extend(command, nix_unit_features)
+  append_nix_unit_extra_args(command, opts)
   table.insert(command, "--flake")
   table.insert(command, flake)
   return command
@@ -279,7 +315,7 @@ local function resolve_flake(opts, position, tree, root)
     return configured.flake
   end
 
-  return require("neotest-nix.eval").detect_nix_unit_flake(root, suite_test_names(tree))
+  return require("neotest-nix.eval").detect_nix_unit_flake(root, suite_test_names(tree), opts)
 end
 
 ---@param path string
@@ -464,16 +500,20 @@ function M.build_spec(args, opts)
     or position.nixpkgs_file_eval
   if nixpkgs_target ~= nil then
     local nixpkgs = require("neotest-nix.nixpkgs")
-    local command, runner = nixpkgs.build_command(position)
+    local command, runner = nixpkgs.build_command(position, opts)
     -- Only a nixpkgs_attr target (nixosTests.<name>) can carry
     -- test_script_range; nixpkgs_file_build/eval positions never do.
     if vm_interactive and position.nixpkgs_attr ~= nil then
-      command = driver_interactive_command({
-        "nix-build",
+      -- nix_extra_args goes right after the binary name: this legacy command
+      -- has no --extra-experimental-features-style flag to anchor after.
+      local driver_build_command = { nixpkgs.legacy_bin(opts, "build") }
+      append_nix_extra_args(driver_build_command, opts)
+      vim.list_extend(driver_build_command, {
         "-A",
         position.nixpkgs_attr .. ".driverInteractive",
         "--no-out-link",
       })
+      command = driver_interactive_command(driver_build_command)
     end
     -- Not `vm_interactive and nil or run_strategy(...)`: with a nil middle
     -- term, `and`/`or` chaining falls through to the right-hand side, which
@@ -485,6 +525,7 @@ function M.build_spec(args, opts)
       strategy = strategy,
       context = {
         attr = nixpkgs_target,
+        nix_bin = nix_bin(opts),
         path = position.path,
         pos_id = position.id,
         runner = runner,
@@ -521,7 +562,7 @@ function M.build_spec(args, opts)
   then
     -- Positions under a runtime-generated per-system attrset carry a literal
     -- `<system>` placeholder; substitute the current system at run time.
-    local system = eval.current_system(cwd)
+    local system = eval.current_system(cwd, opts)
     if system == nil then
       vim.notify(
         ("neotest-nix: could not determine the current system to run %s"):format(attr),
@@ -557,9 +598,10 @@ function M.build_spec(args, opts)
     end
 
     command = {
-      "nix-unit",
+      nix_unit_bin(opts),
     }
     vim.list_extend(command, nix_unit_features)
+    append_nix_unit_extra_args(command, opts)
     table.insert(command, "--expr")
     table.insert(command, nix_unit_select_expr(flake, position.name))
     context_attr = flake
@@ -578,34 +620,37 @@ function M.build_spec(args, opts)
       return nil
     end
 
-    command = nix_unit_flake_command(flake)
+    command = nix_unit_flake_command(flake, opts)
     context_attr = flake
     runner = "nix-unit"
   elseif namespace_flake ~= nil then
-    command = nix_unit_flake_command(namespace_flake)
+    command = nix_unit_flake_command(namespace_flake, opts)
     context_attr = namespace_flake
     runner = "nix-unit"
   elseif attr == nil then
     command = {
-      "nix",
+      nix_bin(opts),
       "flake",
       "check",
     }
     vim.list_extend(command, nix_features)
+    append_nix_extra_args(command, opts)
     table.insert(command, "--keep-going")
     -- Do not lock the flake on disk just to run tests.
     table.insert(command, "--no-write-lock-file")
   elseif position.runner == "nix-unit" then
     command = {
-      "nix-unit",
+      nix_unit_bin(opts),
     }
     vim.list_extend(command, nix_unit_features)
+    append_nix_unit_extra_args(command, opts)
     table.insert(command, "--expr")
     table.insert(command, nix_unit_expr(attr, attr_parts, position.nix_unit_kind, position.path))
   elseif vm_interactive then
     ---@cast attr_parts string[]
-    local build_command = { "nix", "build" }
+    local build_command = { nix_bin(opts), "build" }
     vim.list_extend(build_command, nix_features)
+    append_nix_extra_args(build_command, opts)
     vim.list_extend(build_command, { "--no-link", "--print-out-paths", "--no-write-lock-file" })
     table.insert(
       build_command,
@@ -615,10 +660,11 @@ function M.build_spec(args, opts)
   else
     ---@cast attr_parts string[]
     command = {
-      "nix",
+      nix_bin(opts),
       "build",
     }
     vim.list_extend(command, nix_features)
+    append_nix_extra_args(command, opts)
     table.insert(command, "--keep-going")
     -- Do not lock the flake on disk just to run tests.
     table.insert(command, "--no-write-lock-file")
@@ -635,6 +681,7 @@ function M.build_spec(args, opts)
     strategy = strategy,
     context = {
       attr = context_attr,
+      nix_bin = nix_bin(opts),
       path = position.path,
       pos_id = position.id,
       runner = runner,

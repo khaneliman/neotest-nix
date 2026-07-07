@@ -332,6 +332,78 @@ describe("eval_outputs", function()
     assert.are.equal("x86_64-linux", eval.current_system(root))
     assert.are.equal(1, calls)
   end)
+
+  it("caches the current system per root and command config", function()
+    local original = vim.system
+    local calls = 0
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(command, _, callback)
+      calls = calls + 1
+      local system = command[1] == "nix-custom" and "aarch64-linux\n" or "x86_64-linux\n"
+      callback({ code = 0, stdout = system, stderr = "" })
+      return {}
+    end
+    finally(function()
+      vim.system = original
+    end)
+
+    local root = vim.fn.tempname()
+    assert.are.equal("x86_64-linux", eval.current_system(root))
+    assert.are.equal("aarch64-linux", eval.current_system(root, { nix_bin = "nix-custom" }))
+    assert.are.equal(2, calls)
+  end)
+
+  it("uses a configured nix_bin for the system probe", function()
+    local original = vim.system
+    local captured
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(command, _, callback)
+      captured = command
+      callback({ code = 0, stdout = "x86_64-linux\n", stderr = "" })
+      return {}
+    end
+    finally(function()
+      vim.system = original
+    end)
+
+    eval.current_system(vim.fn.tempname(), { nix_bin = "/opt/nix/bin/nix" })
+
+    assert.are.equal("/opt/nix/bin/nix", captured[1])
+  end)
+
+  it("threads nix_bin and nix_extra_args into eval_outputs commands", function()
+    local original = vim.system
+    local commands = {}
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(command, _, callback)
+      table.insert(commands, command)
+      local joined = table.concat(command, " ")
+      if joined:find("builtins.currentSystem", 1, true) then
+        callback({ code = 0, stdout = "x86_64-linux\n", stderr = "" })
+      else
+        callback({ code = 0, stdout = '["unit"]', stderr = "" })
+      end
+      return {}
+    end
+    finally(function()
+      vim.system = original
+    end)
+
+    local result = eval.eval_outputs(vim.fn.tempname(), { { attr = "checks" } }, {
+      nix_bin = "nix-custom",
+      nix_extra_args = { "-L" },
+    })
+
+    if result == nil then
+      error("eval_outputs returned nil")
+    end
+
+    assert.are.equal(2, #commands)
+    for _, command in ipairs(commands) do
+      assert.are.equal("nix-custom", command[1])
+      assert.is_truthy(vim.tbl_contains(command, "-L"))
+    end
+  end)
 end)
 
 describe("nix-unit flake detection", function()
@@ -389,6 +461,30 @@ describe("nix-unit flake detection", function()
     assert.are.equal(1, calls)
   end)
 
+  it("caches detected outputs per root, suite names, and command config", function()
+    local original_system = vim.system
+    local calls = 0
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(command, _, callback)
+      calls = calls + 1
+      local output = command[1] == "nix-custom" and '["libTests"]' or '["tests"]'
+      callback({ code = 0, stdout = output, stderr = "" })
+      return {}
+    end
+    finally(function()
+      vim.system = original_system
+    end)
+
+    local root = vim.fn.tempname()
+    local names = { "testCacheConfig" }
+    local first = eval.detect_nix_unit_flake(root, names)
+    local second = eval.detect_nix_unit_flake(root, names, { nix_bin = "nix-custom" })
+
+    assert.are.equal(".#tests", first)
+    assert.are.equal(".#libTests", second)
+    assert.are.equal(2, calls)
+  end)
+
   it("returns nil when flake detection cannot spawn nix", function()
     local log_path = (function()
       local env = vim.env.NEOTEST_NIX_DEBUG
@@ -421,4 +517,78 @@ describe("nix-unit flake detection", function()
       table.concat(vim.fn.readfile(log_path), "\n"):find("detect_nix_unit_flake", 1, true)
     )
   end)
+
+  it("threads nix_bin and nix_extra_args into flake detection", function()
+    local original_system = vim.system
+    local captured
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(command, _, callback)
+      captured = command
+      callback({ code = 0, stdout = '["tests"]', stderr = "" })
+      return {}
+    end
+    finally(function()
+      vim.system = original_system
+    end)
+
+    eval.detect_nix_unit_flake(
+      vim.fn.tempname(),
+      { "testConfiguredBin" },
+      { nix_bin = "nix-custom", nix_extra_args = { "-L" } }
+    )
+
+    assert.are.equal("nix-custom", captured[1])
+    assert.is_truthy(vim.tbl_contains(captured, "-L"))
+  end)
+end)
+
+describe("nixpkgs_test_names", function()
+  local eval = require("neotest-nix.eval")
+
+  it("uses nix-instantiate under its literal name for a bare nix_bin", function()
+    local original = vim.system
+    local captured
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(command, _, callback)
+      captured = command
+      callback({ code = 0, stdout = '["alpha"]', stderr = "" })
+      return {}
+    end
+    finally(function()
+      vim.system = original
+    end)
+
+    local names = eval.nixpkgs_test_names(vim.fn.tempname(), "hello", { nix_bin = "nix" })
+
+    assert.are.same({ "alpha" }, names)
+    assert.are.equal("nix-instantiate", captured[1])
+  end)
+
+  it(
+    "derives nix-instantiate alongside a path-shaped nix_bin, extra args after the binary",
+    function()
+      local original = vim.system
+      local captured
+      ---@diagnostic disable-next-line: duplicate-set-field
+      vim.system = function(command, _, callback)
+        captured = command
+        callback({ code = 0, stdout = '["alpha"]', stderr = "" })
+        return {}
+      end
+      finally(function()
+        vim.system = original
+      end)
+
+      eval.nixpkgs_test_names(
+        vim.fn.tempname(),
+        "hello",
+        { nix_bin = "/opt/nix/bin/nix", nix_extra_args = { "-L" } }
+      )
+
+      assert.are.same(
+        { "/opt/nix/bin/nix-instantiate", "-L", "--eval", "--strict", "--json", "--expr" },
+        { captured[1], captured[2], captured[3], captured[4], captured[5], captured[6] }
+      )
+    end
+  )
 end)

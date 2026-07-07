@@ -857,4 +857,270 @@ describe("spec", function()
     }
     assert.is_nil(spec.build_spec(run_args))
   end)
+
+  describe("configured binaries and extra args", function()
+    it("threads a configured nix_bin and nix_extra_args into a targeted nix build", function()
+      local root = project()
+      local file = node({
+        id = "file",
+        name = "flake.nix",
+        path = vim.fs.joinpath(root, "flake.nix"),
+        type = "file",
+      })
+      local checks =
+        node({ id = "checks", name = "checks", path = file:data().path, type = "namespace" }, file)
+      local system = node({
+        id = "system",
+        name = "aarch64-darwin",
+        path = file:data().path,
+        type = "namespace",
+      }, checks)
+      local test =
+        node({ id = "unit", name = "unit", path = file:data().path, type = "test" }, system)
+
+      ---@type any
+      local run_args = { tree = test }
+      local run = spec.build_spec(run_args, {
+        nix_bin = "/opt/nix/bin/nix",
+        nix_extra_args = { "--option", "builders", "" },
+      })
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.same({
+        "/opt/nix/bin/nix",
+        "build",
+        "--extra-experimental-features",
+        "nix-command flakes",
+        "--option",
+        "builders",
+        "",
+        "--keep-going",
+        "--no-write-lock-file",
+        ".#checks.aarch64-darwin.unit",
+      }, run.command)
+    end)
+
+    it("threads a configured nix_bin and nix_extra_args into a whole nix flake check", function()
+      local root = project()
+      local tree = node({
+        id = "file",
+        name = "flake.nix",
+        path = vim.fs.joinpath(root, "flake.nix"),
+        type = "file",
+      })
+
+      ---@type any
+      local run_args = { tree = tree }
+      local run = spec.build_spec(run_args, {
+        nix_bin = "nix-custom",
+        nix_extra_args = { "-L" },
+      })
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.same({
+        "nix-custom",
+        "flake",
+        "check",
+        "--extra-experimental-features",
+        "nix-command flakes",
+        "-L",
+        "--keep-going",
+        "--no-write-lock-file",
+      }, run.command)
+    end)
+
+    it("threads a configured nix_unit_bin and nix_unit_extra_args into nix-unit --flake", function()
+      local root = project()
+      local file = node({
+        id = "file",
+        name = "flake.nix",
+        path = vim.fs.joinpath(root, "flake.nix"),
+        type = "file",
+      })
+      local tests = Tree:new(
+        {
+          id = "tests",
+          name = "tests",
+          path = file:data().path,
+          type = "namespace",
+        },
+        file,
+        {
+          Tree:new({
+            attr_path = "tests.testPass",
+            id = "tests.testPass",
+            name = "testPass",
+            nix_unit_kind = "flake",
+            path = file:data().path,
+            runner = "nix-unit",
+            type = "test",
+          }),
+        }
+      )
+
+      ---@type any
+      local run_args = { tree = tests }
+      local run = spec.build_spec(run_args, {
+        nix_unit_bin = "/opt/nix/bin/nix-unit",
+        nix_unit_extra_args = { "-L" },
+      })
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.same({
+        "/opt/nix/bin/nix-unit",
+        "--extra-experimental-features",
+        "flakes",
+        "-L",
+        "--flake",
+        ".#tests",
+      }, run.command)
+    end)
+
+    it("threads configured nix args into the generic lib.runTests fallback", function()
+      local root = project()
+      local tests_dir = vim.fs.joinpath(root, "tests")
+      vim.fn.mkdir(tests_dir, "p")
+      local path = vim.fs.joinpath(tests_dir, "default.nix")
+      vim.fn.writefile({
+        "let lib = (import <nixpkgs> { }).lib; in lib.runTests {",
+        "  testPass = { expr = 1; expected = 1; };",
+        "}",
+      }, path)
+
+      ---@type any
+      local run_args = {
+        tree = node({
+          id = path,
+          name = "default.nix",
+          path = path,
+          type = "file",
+        }),
+        strategy = "dap",
+      }
+      local run = spec.build_spec(run_args, {
+        nix_bin = "/opt/nix/bin/nix",
+        nix_extra_args = { "-L" },
+      })
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.same({
+        "/opt/nix/bin/nix-instantiate",
+        "-L",
+        "--eval",
+        "--strict",
+        "--json",
+        path,
+      }, run.command)
+      assert.are.equal("/opt/nix/bin/nix", run.context.nix_bin)
+      assert.is_nil(run.strategy)
+    end)
+
+    it(
+      "threads a configured nix_unit_bin and nix_unit_extra_args into a targeted nix-unit expr",
+      function()
+        local root = project()
+        local test = node({
+          attr_path = "tests.testPass",
+          id = "testPass",
+          name = "testPass",
+          nix_unit_kind = "flake",
+          path = vim.fs.joinpath(root, "flake.nix"),
+          runner = "nix-unit",
+          type = "test",
+        })
+
+        ---@type any
+        local run_args = { tree = test }
+        local run = spec.build_spec(run_args, {
+          nix_unit_bin = "nix-unit-custom",
+          nix_unit_extra_args = { "--show-trace" },
+        })
+
+        assert.is_not_nil(run)
+        ---@cast run neotest.RunSpec
+        assert.same({
+          "nix-unit-custom",
+          "--extra-experimental-features",
+          "flakes",
+          "--show-trace",
+          "--expr",
+          "{ testPass = (builtins.getFlake (toString ./. )).tests.testPass; }",
+        }, run.command)
+      end
+    )
+
+    it("derives nix-build from a path-shaped nix_bin for nixpkgs -A runs", function()
+      local root = project()
+      local path = vim.fs.joinpath(root, "pkgs", "by-name", "he", "hello", "package.nix")
+      local test = node({
+        id = path .. "::tests::simple",
+        name = "simple",
+        path = path,
+        type = "test",
+        runner = "nix",
+        nixpkgs_attr = "hello.tests.simple",
+      })
+
+      ---@type any
+      local run_args = { tree = test }
+      local run =
+        spec.build_spec(run_args, { nix_bin = "/opt/nix/bin/nix", nix_extra_args = { "-L" } })
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.same(
+        { "/opt/nix/bin/nix-build", "-L", "-A", "hello.tests.simple", "--no-out-link" },
+        run.command
+      )
+    end)
+
+    it("derives nix-instantiate from a path-shaped nix_bin for nixpkgs eval runs", function()
+      local root = project()
+      local path = vim.fs.joinpath(root, "lib", "tests", "misc.nix")
+      ---@type any
+      local run_args = {
+        tree = node({
+          id = path,
+          name = "misc.nix",
+          path = path,
+          type = "file",
+          runner = "nix-eval",
+          nixpkgs_file_eval = "lib/tests/misc.nix",
+        }),
+      }
+      local run = spec.build_spec(run_args, { nix_bin = "/opt/nix/bin/nix" })
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.same(
+        { "/opt/nix/bin/nix-instantiate", "--eval", "--strict", "--json", "lib/tests/misc.nix" },
+        run.command
+      )
+    end)
+
+    it("leaves nix-build under its own literal name for a bare nix_bin", function()
+      local root = project()
+      local path = vim.fs.joinpath(root, "lib", "tests", "release.nix")
+      ---@type any
+      local run_args = {
+        tree = node({
+          id = path,
+          name = "release.nix",
+          path = path,
+          type = "file",
+          runner = "nix",
+          nixpkgs_file_build = "lib/tests/release.nix",
+        }),
+      }
+      local run = spec.build_spec(run_args, { nix_bin = "nix" })
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.same({ "nix-build", "lib/tests/release.nix", "--no-out-link" }, run.command)
+    end)
+  end)
 end)
