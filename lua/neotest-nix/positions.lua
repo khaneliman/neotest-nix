@@ -260,6 +260,48 @@ local function has_checks_context(binding, source)
   return false
 end
 
+---@param binding TSNode
+---@param source string
+---@return boolean
+local function has_outputs_context(binding, source)
+  ---@type TSNode?
+  local current = binding
+
+  while current ~= nil do
+    if current:type() == "binding" then
+      local attrpath = binding_attrpath(current)
+      if attrpath ~= nil then
+        local parts = attrpath_parts(attrpath, source)
+        if parts[1] == "outputs" then
+          return true
+        end
+      end
+    end
+
+    current = current:parent()
+  end
+
+  return false
+end
+
+---@param binding TSNode
+---@param source string
+---@return boolean
+local function is_run_nixos_test_value(binding, source)
+  local expression = binding_expression(binding)
+  if expression == nil or expression:type() ~= "apply_expression" then
+    return false
+  end
+
+  local callee = expression:named_child(0)
+  if callee == nil then
+    return false
+  end
+
+  local text = vim.treesitter.get_node_text(callee, source)
+  return text:match("%.testers%.runNixOSTest$") ~= nil
+end
+
 ---@param node TSNode
 ---@param callback fun(node: TSNode): TSNode?
 ---@return TSNode?
@@ -360,7 +402,11 @@ function M.build_position(file_path, source, captured_nodes)
   local dynamic_system = is_dynamic_system_check(parts)
   local is_check = is_dotted_check(parts) or dynamic_system
   local is_nix_unit = is_nix_unit_test(parts) and is_nix_unit_value(binding, source)
-  if not is_check and not is_nix_unit then
+  local is_standalone_vm = vim.fs.basename(file_path) == "flake.nix"
+    and parts[1] ~= "checks"
+    and has_outputs_context(binding, source)
+    and is_run_nixos_test_value(binding, source)
+  if not is_check and not is_nix_unit and not is_standalone_vm then
     return nil
   end
 
@@ -379,7 +425,7 @@ function M.build_position(file_path, source, captured_nodes)
     range = { definition:range() },
   }
 
-  if is_check then
+  if is_check or is_standalone_vm then
     position.dynamic_system = dynamic_system or nil
     position.test_script_range = test_script_range(binding, source)
   elseif is_nix_unit then

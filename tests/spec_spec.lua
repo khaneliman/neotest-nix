@@ -845,6 +845,58 @@ describe("spec", function()
     end
   )
 
+  it("builds a targeted nix build for standalone runNixOSTest flake outputs", function()
+    local root = project()
+    local test = node({
+      attr_path = "nixosTests.login",
+      attr_path_parts = { "nixosTests", "login" },
+      id = "login",
+      name = "login",
+      path = vim.fs.joinpath(root, "flake.nix"),
+      runner = "nix",
+      test_script_range = { 1, 0, 5, 0 },
+      type = "test",
+    })
+
+    local run = build_spec({ tree = test })
+
+    assert.same({
+      "nix",
+      "build",
+      "--extra-experimental-features",
+      "nix-command flakes",
+      "--keep-going",
+      "--no-write-lock-file",
+      ".#nixosTests.login",
+    }, run.command)
+    assert.are.equal("nixosTests.login", run.context.attr)
+  end)
+
+  it("builds driverInteractive for standalone runNixOSTest flake outputs", function()
+    local root = project()
+    local test = node({
+      attr_path = "nixosTests.login",
+      attr_path_parts = { "nixosTests", "login" },
+      id = "login",
+      name = "login",
+      path = vim.fs.joinpath(root, "flake.nix"),
+      runner = "nix",
+      test_script_range = { 1, 0, 5, 0 },
+      type = "test",
+    })
+
+    ---@type any
+    local run_args = { tree = test }
+    local run = spec.build_spec(run_args, { vm_interactive = true })
+
+    assert.is_not_nil(run)
+    ---@cast run neotest.RunSpec
+    assert.are.equal("sh", run.command[1])
+    assert.is_truthy(run.command[3]:find(".#nixosTests.login.driverInteractive", 1, true))
+    assert.is_nil(run.strategy)
+    assert.is_nil(run.stream)
+  end)
+
   it("builds a Namaka check command at the Namaka root", function()
     local root = project()
     local path = vim.fs.joinpath(root, "tests", "case", "expr.nix")

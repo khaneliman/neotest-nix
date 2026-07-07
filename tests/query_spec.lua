@@ -292,4 +292,51 @@ describe("nix query", function()
 
     error("missing vm position")
   end)
+
+  it("discovers standalone flake outputs that call testers.runNixOSTest", function()
+    local positions = parse_source(
+      table.concat({
+        "{",
+        "  outputs = { nixpkgs, ... }: {",
+        "    nixosTests.login = nixpkgs.legacyPackages.x86_64-linux.testers.runNixOSTest {",
+        '      name = "login";',
+        "      testScript = ''",
+        '        machine.succeed("true")',
+        "      '';",
+        "    };",
+        "  };",
+        "}",
+      }, "\n"),
+      "flake.nix"
+    )
+
+    local position = find_position(positions, "login")
+    assert.is_not_nil(position)
+    assert.are.equal("nix", position.runner)
+    assert.are.equal("nixosTests.login", position.attr_path)
+    assert.are.same({ "nixosTests", "login" }, position.attr_path_parts)
+    assert.is_not_nil(position.test_script_range)
+  end)
+
+  it("does not treat a runNixOSTest container attrset as its own test", function()
+    local positions = parse_source(
+      table.concat({
+        "{",
+        "  outputs = { nixpkgs, ... }: {",
+        "    nixosTests = {",
+        "      login = nixpkgs.legacyPackages.x86_64-linux.testers.runNixOSTest {",
+        "        testScript = ''",
+        '          machine.succeed("true")',
+        "        '';",
+        "      };",
+        "    };",
+        "  };",
+        "}",
+      }, "\n"),
+      "flake.nix"
+    )
+
+    assert.is_nil(find_position(positions, "nixosTests"))
+    assert.is_not_nil(find_position(positions, "login"))
+  end)
 end)
