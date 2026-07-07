@@ -6,7 +6,7 @@ package = "neotest-nix"
 version = modrev .. "-" .. specrev
 
 description = {
-  summary = "A Neotest adapter for Nix flakes.",
+  summary = "A Neotest adapter for Nix tests.",
   license = "MIT",
 }
 
