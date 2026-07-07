@@ -4,13 +4,15 @@
 ---@brief [[
 ---
 ---neotest-nix is a Neotest adapter for running Nix tests directly from Neovim.
----It discovers two kinds of tests in a flake-based project and runs them in
+---It discovers flake and non-flake Nix tests and runs them in
 ---place:
 ---
 ---  - Flake checks: `checks.<system>.<name>` derivations, including NixOS VM
 ---    tests with a `testScript`. Run with `nix`.
 ---  - nix-unit tests: attribute sets shaped `{ expr = ...; expected = ...; }`
 ---    (or `expectedError`). Run with `nix-unit`.
+---  - Namaka snapshot tests: `namaka.toml` projects and `tests/**/expr.nix`
+---    files. Run with `namaka check`.
 ---
 ---Run |:checkhealth| neotest-nix to verify your setup.
 ---@brief ]]
@@ -22,6 +24,7 @@
 ---    its own `nix` calls, so these features do not need to be enabled globally
 ---    in your Nix config.
 ---  - `nix-unit` on PATH (only for nix-unit tests)
+---  - `namaka` on PATH (only for Namaka snapshot tests)
 ---  - Plugin dependencies: `neotest` and `nvim-nio`
 ---  - The `nix` tree-sitter grammar on your runtimepath (a `parser/nix.so`).
 ---    Positions are parsed through Neovim's built-in |vim.treesitter|, so any
@@ -58,8 +61,8 @@
 
 ---@mod neotest-nix.usage Usage
 ---@brief [[
----Open a `flake.nix` (or a `*.nix` file whose name contains `test` and which
----holds nix-unit assertions) and use the standard Neotest commands: >lua
+---Open a `flake.nix`, a recognized non-flake `*.nix` test file, or a Namaka
+---test project/file and use the standard Neotest commands: >lua
 ---    require("neotest").run.run()                   -- nearest test
 ---    require("neotest").run.run(vim.fn.expand("%")) -- whole file
 ---    require("neotest").summary.toggle()            -- test tree
@@ -77,10 +80,13 @@
 ---      nixpkgs_mode = nil,
 ---      discover_nixpkgs_eval_tests = false,
 ---      vm_interactive = false,
+---      non_flake_roots = true,
 ---      nix_bin = "nix",
 ---      nix_unit_bin = "nix-unit",
+---      namaka_bin = "namaka",
 ---      nix_extra_args = nil,
 ---      nix_unit_extra_args = nil,
+---      namaka_extra_args = nil,
 ---    })
 ---<
 ---                                    *neotest-nix-config-parser_runtime_paths*
@@ -162,6 +168,14 @@
 ---    output path is not supported (the captured path is used as-is, so extra
 ---    lines from `--print-out-paths` corrupt it).
 ---
+---                                         *neotest-nix-config-non_flake_roots*
+---`non_flake_roots`            `boolean?` (default `true`)
+---    Enable first-class roots for recognized non-flake test files. Root
+---    priority is: Nixpkgs checkout, flake root, Namaka `namaka.toml` root,
+---    nearest Git root for recognized non-flake Nix test files, then the file's
+---    parent directory. Set `false` to restore flake-only root behavior outside
+---    Nixpkgs.
+---
 ---                                                  *neotest-nix-config-nix_bin*
 ---`nix_bin`                     `string?` (default `"nix"`)
 ---    Executable used for every `nix` CLI invocation (`nix build`, `nix eval`,
@@ -178,6 +192,10 @@
 ---    Executable used for every `nix-unit` invocation. Set this for a `nix-unit`
 ---    that is not on `PATH` under its default name.
 ---
+---                                                *neotest-nix-config-namaka_bin*
+---`namaka_bin`                  `string?` (default `"namaka"`)
+---    Executable used for every Namaka invocation.
+---
 ---                                           *neotest-nix-config-nix_extra_args*
 ---`nix_extra_args`              `string[]?` (default `nil`)
 ---    Extra arguments appended to every `nix`-family command this adapter runs
@@ -193,15 +211,23 @@
 ---    Extra arguments appended to every `nix-unit` command, in the same position
 ---    (after `--extra-experimental-features`, before `--flake`/`--expr` and its
 ---    value).
+---
+---                                         *neotest-nix-config-namaka_extra_args*
+---`namaka_extra_args`           `string[]?` (default `nil`)
+---    Extra global arguments inserted after `namaka_bin` and before the
+---    `check` command.
 ---@brief ]]
 
 ---@mod neotest-nix.discovery Discovery
 ---@brief [[
----  - `flake.nix` is always treated as a test file.
+---  - `flake.nix` is treated as a test file outside Nixpkgs checkouts.
 ---  - Any other `*.nix` file is a test file only when its name OR its immediate
 ---    parent directory contains `test` AND it contains a nix-unit assertion
 ---    (`expr` plus `expected` or `expectedError`). This covers both
 ---    `foo_test.nix` and the common `tests/default.nix` layout.
+---  - Namaka projects expose `namaka.toml` and `tests/**/expr.nix` files under
+---    that root, excluding `_snapshots` directories. Namaka runs at project/file
+---    granularity; individual snapshot cases are not parsed.
 ---  - nix-unit assertions are discovered when their value has nix-unit shape
 ---    (`expr` plus `expected` or `expectedError`). Attribute names do not need
 ---    a `test` prefix; `addition` and `testAddition` both appear.
@@ -227,8 +253,9 @@
 
 ---@mod neotest-nix.limitations Limitations
 ---@brief [[
----  - Tests are only discovered inside a flake project. With no `flake.nix` at
----    or above the file, the adapter does not apply.
+---  - Raw non-flake NixOS VM test files are not supported; standalone
+---    `testers.runNixOSTest` discovery applies to flake outputs and runs
+---    `nix build .#<attr>`.
 ---  - nix-unit runners evaluate the flake with `builtins.getFlake`, which sees
 ---    only git-tracked files. A brand-new, untracked `flake.nix` or test file is
 ---    invisible until it is staged or committed.
@@ -268,11 +295,12 @@
 ---@mod neotest-nix.health Health
 ---@brief [[
 ---Run |:checkhealth| neotest-nix to confirm the Neovim version, the `neotest`
----and `nvim-nio` plugins, the `nix` and `nix-unit` executables (honouring
----`nix_bin`/`nix_unit_bin`), a minimum `nix` version, and the `nix` tree-sitter
----grammar are all in place. It also warns when `git` is missing (see
----|neotest-nix.limitations| for why nix-unit and `builtins.getFlake` need it),
----and reports unknown or wrong-typed configuration keys.
+---and `nvim-nio` plugins, the `nix`, `nix-unit`, and `namaka` executables
+---(honouring `nix_bin`/`nix_unit_bin`/`namaka_bin`), a minimum `nix` version,
+---and the `nix` tree-sitter grammar are all in place. It also warns when `git`
+---is missing (see |neotest-nix.limitations| for why nix-unit and
+---`builtins.getFlake` need it), and reports unknown or wrong-typed
+---configuration keys.
 ---@brief ]]
 
 -- Annotation-only module: nothing requires it at runtime. It is the single

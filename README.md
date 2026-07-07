@@ -7,12 +7,14 @@
 A [Neotest](https://github.com/nvim-neotest/neotest) adapter for running Nix
 tests directly from Neovim.
 
-It discovers three kinds of tests and runs them in place:
+It discovers four kinds of tests and runs them in place:
 
 - **Flake checks** — `checks.<system>.<name>` derivations, including NixOS VM
   tests with a `testScript`. Run with `nix`.
 - **nix-unit tests** — attribute sets shaped `{ expr = ...; expected = ...; }`
   (or `expectedError`). Run with [`nix-unit`](https://github.com/nix-community/nix-unit).
+- **Namaka snapshot tests** — `namaka.toml` projects and `tests/**/expr.nix`
+  files. Run with [`namaka`](https://github.com/nix-community/namaka).
 - **Nixpkgs checkouts** — `pkgs/by-name` `passthru.tests`, `lib/tests`
   eval and build tests, and `nixos/tests` VM tests. Run with legacy commands
   (`nix-build`/`nix-instantiate`) that evaluate the working tree in place.
@@ -45,6 +47,8 @@ It discovers three kinds of tests and runs them in place:
   not need to be enabled globally in your Nix config.
 - [`nix-unit`](https://github.com/nix-community/nix-unit) on `PATH` (only for
   nix-unit tests)
+- [`namaka`](https://github.com/nix-community/namaka) on `PATH` (only for
+  Namaka snapshot tests)
 - Plugin dependencies: [`neotest`](https://github.com/nvim-neotest/neotest)
   and [`nvim-nio`](https://github.com/nvim-neotest/nvim-nio)
 - The `nix` tree-sitter grammar on your runtimepath (a `parser/nix.so`).
@@ -129,8 +133,8 @@ The adapter discovers tests like these straight from the source:
 }
 ```
 
-Open a `flake.nix` (or a `*.nix` file with `test` in its name containing
-nix-unit assertions) and use the standard Neotest commands:
+Open a `flake.nix`, recognized non-flake `*.nix` test file, or Namaka
+project/file and use the standard Neotest commands:
 
 ```lua
 require("neotest").run.run()              -- nearest test
@@ -173,6 +177,18 @@ require("neotest-nix")({
   -- If a by-name package has computed passthru.tests and no static names,
   -- evaluate the package lazily to enumerate individual test attrs.
   discover_nixpkgs_eval_tests = false,
+
+  -- Enable first-class roots for recognized non-flake files. Set false to
+  -- restore flake-only behavior outside Nixpkgs.
+  non_flake_roots = true,
+
+  -- Override external executables and extra args.
+  nix_bin = "nix",
+  nix_unit_bin = "nix-unit",
+  namaka_bin = "namaka",
+  nix_extra_args = nil,
+  nix_unit_extra_args = nil,
+  namaka_extra_args = nil,
 })
 ```
 
@@ -184,15 +200,25 @@ require("neotest-nix")({
 | `nix_unit_flakes` | `neotest-nix.NixUnitFlake[]?` | `nil` | Map wrapped nix-unit files to a flake installable, overriding auto-detection. |
 | `nixpkgs_mode` | `boolean?` | `nil` | Auto-detect, force, or disable Nixpkgs-style legacy discovery. |
 | `discover_nixpkgs_eval_tests` | `boolean?` | `false` | Lazily evaluate computed by-name `passthru.tests` when static parsing finds none. |
+| `non_flake_roots` | `boolean?` | `true` | Enable recognized non-flake roots; set false for flake-only behavior. |
+| `nix_bin` | `string?` | `"nix"` | Executable for nix CLI invocations. |
+| `nix_unit_bin` | `string?` | `"nix-unit"` | Executable for nix-unit invocations. |
+| `namaka_bin` | `string?` | `"namaka"` | Executable for Namaka invocations. |
+| `nix_extra_args` | `string[]?` | `nil` | Extra args for nix-family commands. |
+| `nix_unit_extra_args` | `string[]?` | `nil` | Extra args for nix-unit commands. |
+| `namaka_extra_args` | `string[]?` | `nil` | Extra global args before Namaka's command. |
 
 ## How discovery works
 
-- `flake.nix` is always treated as a test file.
+- `flake.nix` is treated as a test file outside Nixpkgs checkouts.
 - Any other `*.nix` file is considered a test file only when its name **or its
   immediate parent directory** contains `test` **and** it contains a nix-unit
   assertion (`expr` plus `expected` or `expectedError`). This covers both
   `foo_test.nix` and the common `tests/default.nix` layout. A `lib.nix` holding
   nix-unit tests outside a `test`-named file or directory is not discovered.
+- Namaka projects expose `namaka.toml` and `tests/**/expr.nix` under the
+  Namaka root. `_snapshots` directories are skipped. Namaka runs at file/project
+  granularity; individual snapshot cases are not parsed.
 - nix-unit assertions are surfaced as individual positions when their value has
   nix-unit shape (`expr` plus `expected` or `expectedError`). Attribute names do
   not need a `test` prefix; `addition` and `testAddition` both appear.
@@ -213,8 +239,9 @@ require("neotest-nix")({
 
 ## Limitations
 
-- Tests are only discovered inside a flake project. With no `flake.nix` at or
-  above the file, the adapter does not apply.
+- Raw non-flake NixOS VM test files are not supported. Standalone
+  `testers.runNixOSTest` discovery applies to flake outputs and runs
+  `nix build .#<attr>`.
 - nix-unit runners evaluate the flake with `builtins.getFlake`, which sees only
   git-tracked files. A brand-new, untracked `flake.nix` or test file is
   invisible until it is staged or committed.
