@@ -205,8 +205,23 @@ describe("health config check", function()
         end,
       }
     end
+
+    -- health.lua only calls check_nix_version() when vim.fn.executable("nix")
+    -- reports 1; stub it so this test is independent of whether the sandbox
+    -- running it actually has `nix` on PATH (the build sandbox for
+    -- nvim-stable-test/nvim-nightly-test does not).
+    local real_executable = vim.fn.executable
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.fn.executable = function(name)
+      if name == "nix" then
+        return 1
+      end
+      return real_executable(name)
+    end
+
     finally(function()
       vim.system = real_system
+      vim.fn.executable = real_executable
     end)
   end
 
