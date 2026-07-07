@@ -4,12 +4,33 @@
     {
       config,
       pkgs,
+      system,
       ...
     }:
     let
       luarcPkgs = pkgs.extend inputs.gen-luarc.overlays.default;
       neorocksPkgs = pkgs.extend inputs.neorocks.overlays.default;
       nixParser = pkgs.neovimUtils.grammarToPlugin pkgs.tree-sitter-grammars.tree-sitter-nix;
+
+      # Neovim >= 0.11 is the coding-standards floor (CONTRIBUTING.md), but
+      # neither of the checks below actually pins to it: nixpkgs-unstable's
+      # `neovim-unwrapped` and `neovim-nightly` are both already well past it
+      # (0.12+ as of writing). Pull a real 0.11.x from the nixos-25.05 release
+      # branch instead, via a hash-pinned `fetchTarball` rather than a flake
+      # input: a flake input would mean editing flake/dev/flake.nix and
+      # flake/dev/flake.lock, doubling the surface this change touches, and a
+      # *branch* input would move under us. `neovim-unwrapped` there is
+      # 0.11.5 (verified) and its closure is fully cached on
+      # cache.nixos.org (~23 MiB, no source build), so this costs one small
+      # substitution, not a second nixpkgs checkout.
+      nixpkgs-0-11-src = builtins.fetchTarball {
+        url = "https://github.com/NixOS/nixpkgs/archive/ac62194c3917d5f474c1a844b6fd6da2db95077d.tar.gz";
+        sha256 = "16KkgfdYqjaeRGBaYsNrhPRRENs0qzkQVUooNHtoy2w=";
+      };
+      pkgs-0-11 = import nixpkgs-0-11-src {
+        inherit system;
+        config = { };
+      };
       baseLuarc = luarcPkgs.mk-luarc {
         nvim = luarcPkgs.neovim-unwrapped;
         plugins = with luarcPkgs.vimPlugins; [
@@ -101,6 +122,26 @@
           pname = "neotest-nix";
           src = ../..;
           neovim = neorocksPkgs.neovim-nightly;
+          luaPackages =
+            ps: with ps; [
+              neotest
+              nvim-nio
+            ];
+          preCheck = ''
+            export NEOTEST_NIX_TEST_RTP="${nixParser}"
+          '';
+        };
+        # Exercises the documented Neovim >= 0.11 floor itself, rather than
+        # relying on stable/nightly happening to be new enough. `neovim`
+        # comes from the pinned nixpkgs-0-11-src above; the Lua rocks
+        # environment (`luaPackages`) still comes from this system's own
+        # neorocksPkgs, matching nvim-stable-test/nvim-nightly-test -- only
+        # the Neovim binary itself needs to be the older one.
+        nvim-0-11-test = neorocksPkgs.neorocksTest {
+          name = "nvim-0-11-test";
+          pname = "neotest-nix";
+          src = ../..;
+          neovim = pkgs-0-11.neovim-unwrapped;
           luaPackages =
             ps: with ps; [
               neotest

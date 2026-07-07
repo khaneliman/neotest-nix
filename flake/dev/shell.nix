@@ -32,11 +32,13 @@
           ]
           ++ (with pkgs; [
             stylua
+            neovim-unwrapped
             lua51Packages.nlua
             lua51Packages.vusted
             lua-language-server
             nil
             nix-unit
+            namaka
             nixfmt
             vimcats
           ]);

@@ -55,3 +55,38 @@ jobs:
 
       - name: Run flake checks
         run: nix flake check --print-build-logs --system ${{ matrix.system }}
+
+  integration-tests:
+    name: real-nix integration specs (x86_64-linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            extra-substituters = https://nix-community.cachix.org
+            extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
+
+      - name: Setup Cachix
+        if: github.event_name != 'pull_request'
+        uses: cachix/cachix-action@v17
+        with:
+          name: neotest-nix
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      # tests/integration/ runs the real `nix`/`nix-unit` binaries against the
+      # committed fixture flakes under tests/fixtures/ -- the command strings
+      # spec.lua builds and the output parsers in results.lua are otherwise
+      # only ever exercised against stubs (see tests/integration/helpers.lua).
+      # This needs a real nix able to spawn nested `nix build`/`nix-unit`
+      # subprocesses, which the sandboxed `nix flake check` builder above
+      # cannot do (no nested Nix, no network in that sandbox), so it runs as
+      # a plain step in the dev shell instead of a flake check.
+      - name: Run real-nix integration specs
+        env:
+          NEOTEST_NIX_INTEGRATION: '1'
+        run: nix develop -c vusted tests/integration/
