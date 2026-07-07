@@ -62,6 +62,7 @@ local known_config_fields = {
   nix_unit_flakes = "table",
   nixpkgs_mode = "boolean",
   discover_nixpkgs_eval_tests = "boolean",
+  vm_interactive = "boolean",
 }
 
 ---Inspect the active adapter configuration for typos and wrong-typed fields.

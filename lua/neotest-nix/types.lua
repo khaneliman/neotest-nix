@@ -76,6 +76,7 @@
 ---      nix_unit_flakes = nil,
 ---      nixpkgs_mode = nil,
 ---      discover_nixpkgs_eval_tests = false,
+---      vm_interactive = false,
 ---    })
 ---<
 ---                                    *neotest-nix-config-parser_runtime_paths*
@@ -136,6 +137,26 @@
 ---    own. Off by default because it shells out and evaluates the package; the
 ---    eval runs lazily (only for such packages, on expand) and is cached per
 ---    file. Only kicks in when the static parse finds nothing.
+---
+---                                            *neotest-nix-config-vm_interactive*
+---`vm_interactive`              `boolean?` (default `false`)
+---    When running a single NixOS VM-test check (a flake check or a nixpkgs
+---    `nixosTests.<name>` file whose `testScript` was found), build that check's
+---    `driverInteractive` attribute and exec the resulting `bin/nixos-test-driver`
+---    for an interactive debugging session, instead of the normal build. Run it
+---    with Neotest's own `"integrated"` strategy (or another that attaches a real
+---    terminal) rather than the default: >lua
+---        require("neotest").run.run({ strategy = "integrated" })
+---<
+---    since this adapter's own streaming strategy is headless and cannot host an
+---    interactive session; the run spec omits it whenever this option applies.
+---    Limitations: the build and the `exec` are joined with `sh -c '... && exec
+---    "$out/..."'` (two steps in one shell invocation, not a true multi-command
+---    `RunSpec`, which Neotest does not support), so a failing build reports
+---    that failure instead of execing; extra args passed to `run.run` are not
+---    forwarded to the underlying build; and a derivation with more than one
+---    output path is not supported (the captured path is used as-is, so extra
+---    lines from `--print-out-paths` corrupt it).
 ---@brief ]]
 
 ---@mod neotest-nix.discovery Discovery
@@ -243,5 +264,7 @@ local M = {}
 ---@field nix_unit_flakes? neotest-nix.NixUnitFlake[] Run wrapped nix-unit suites via a flake installable.
 ---@field nixpkgs_mode? boolean Force (true) or disable (false) legacy Nixpkgs handling; nil auto-detects.
 ---@field discover_nixpkgs_eval_tests? boolean Eval a Nixpkgs package to enumerate computed passthru.tests.
+---@field vm_interactive? boolean Run a single VM-test check's `driverInteractive` for
+---interactive debugging instead of the normal build.
 
 return M

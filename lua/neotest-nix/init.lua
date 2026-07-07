@@ -101,6 +101,7 @@ local function validate(opts)
   vim.validate("nix_unit_flakes", opts.nix_unit_flakes, "table", true)
   vim.validate("nixpkgs_mode", opts.nixpkgs_mode, "boolean", true)
   vim.validate("discover_nixpkgs_eval_tests", opts.discover_nixpkgs_eval_tests, "boolean", true)
+  vim.validate("vm_interactive", opts.vm_interactive, "boolean", true)
 
   if opts.parser_runtime_paths ~= nil then
     for index, path in ipairs(opts.parser_runtime_paths) do

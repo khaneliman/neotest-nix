@@ -364,6 +364,61 @@ local function cwd_for(path)
   return discover.root(path) or uv.cwd() or "."
 end
 
+---This adapter's custom streaming strategy should only back a run's *default*
+---strategy, not silently replace one a caller names explicitly. Neotest fills
+---`args.strategy` with the project's `default_strategy` (`"integrated"` unless
+---configured otherwise) *before* `build_spec` ever runs
+---(`neotest.client.runner.TestRunner:run_tree`), so plain `nil` never reaches
+---here for an ordinary run; treat it the same as the `"integrated"` default.
+---For any other value (e.g. `"dap"`, set via
+---`require("neotest").run.run({ strategy = "dap" })`) this must return nil:
+---`neotest.client.runner.TestRunner:_run_spec` treats a function `spec.strategy`
+---as a hard override and keeps it over `args.strategy` unconditionally
+---(`vim.tbl_extend("keep", { strategy = spec.strategy }, args)`), so attaching it
+---unconditionally would make every named strategy a no-op.
+---@param args_strategy string|table|neotest.Strategy|nil
+---@return neotest.Strategy?
+local function run_strategy(args_strategy)
+  if args_strategy == nil or args_strategy == "integrated" then
+    return process.strategy
+  end
+  return nil
+end
+
+-- POSIX single-quote escaping: close the quote, emit an escaped literal quote,
+-- reopen it. Safe for any byte string, including embedded newlines.
+---@param value string
+---@return string
+local function shell_quote(value)
+  return "'" .. value:gsub("'", "'\\''") .. "'"
+end
+
+---@param command string[]
+---@return string
+local function shell_join(command)
+  local quoted = {}
+  for index, part in ipairs(command) do
+    quoted[index] = shell_quote(part)
+  end
+  return table.concat(quoted, " ")
+end
+
+---Two-step shell command for interactive NixOS VM debugging: build
+---`build_command`'s `driverInteractive` derivation, then exec the resulting
+---`bin/nixos-test-driver` so it inherits the terminal. Wrapped in `sh -c` since
+---neotest's `RunSpec.command` is a single argv, not a pipeline; `&&` keeps a
+---build failure's exit code and output (rather than execing into a missing
+---path) instead of masking it.
+---@param build_command string[] Command that builds the `.driverInteractive` attribute
+---and prints its store path (e.g. `nix build --print-out-paths ...`).
+---@return string[]
+local function driver_interactive_command(build_command)
+  local script = ('out=$(%s) && exec "$out/bin/nixos-test-driver"'):format(
+    shell_join(build_command)
+  )
+  return { "sh", "-c", script }
+end
+
 ---@param args neotest.RunArgs
 ---@param opts neotest-nix.Config?
 ---@return neotest.RunSpec?
@@ -391,6 +446,15 @@ function M.build_spec(args, opts)
 
   local cwd = cwd_for(position.path)
 
+  -- `test_script_range` marks a single VM-test check (a flake check or a
+  -- nixpkgs `nixosTests.<name>` file whose `testScript` was found by source
+  -- parse; see positions.lua / nixpkgs.lua). `build_spec` runs for exactly the
+  -- given position, so this position carrying it *is* "the run position is a
+  -- single VM-test check" -- no broader-run disambiguation is needed here
+  -- (unlike results.lua's `vm_target`, which attributes tracebacks across runs
+  -- that can cover several VM tests at once).
+  local vm_interactive = opts.vm_interactive == true and position.test_script_range ~= nil
+
   -- Nixpkgs positions run with legacy commands (nix-build / nix-instantiate)
   -- that evaluate the working tree in place, no flake copy-to-store. The runner
   -- selects result parsing: "nix" parses like a flake build; "nix-eval" parses
@@ -401,10 +465,24 @@ function M.build_spec(args, opts)
   if nixpkgs_target ~= nil then
     local nixpkgs = require("neotest-nix.nixpkgs")
     local command, runner = nixpkgs.build_command(position)
+    -- Only a nixpkgs_attr target (nixosTests.<name>) can carry
+    -- test_script_range; nixpkgs_file_build/eval positions never do.
+    if vm_interactive and position.nixpkgs_attr ~= nil then
+      command = driver_interactive_command({
+        "nix-build",
+        "-A",
+        position.nixpkgs_attr .. ".driverInteractive",
+        "--no-out-link",
+      })
+    end
+    -- Not `vm_interactive and nil or run_strategy(...)`: with a nil middle
+    -- term, `and`/`or` chaining falls through to the right-hand side, which
+    -- would reattach the custom strategy exactly when it must be omitted.
+    local strategy = not vm_interactive and run_strategy(args.strategy) or nil
     local run_spec = {
-      command = with_extra_args(command, args.extra_args),
+      command = vm_interactive and command or with_extra_args(command, args.extra_args),
       cwd = cwd,
-      strategy = process.strategy,
+      strategy = strategy,
       context = {
         attr = nixpkgs_target,
         path = position.path,
@@ -414,8 +492,9 @@ function M.build_spec(args, opts)
       },
     }
     -- nix-eval output is a single value parsed at the end; only the streaming
-    -- nix-error scanner applies to plain nix-build runs.
-    if runner == "nix" then
+    -- nix-error scanner applies to plain nix-build runs. The interactive
+    -- driver session is a live REPL, not build output to scan for errors.
+    if runner == "nix" and not vm_interactive then
       run_spec.stream = results.stream(run_spec, tree)
     end
     return run_spec
@@ -512,6 +591,16 @@ function M.build_spec(args, opts)
     vim.list_extend(command, nix_unit_features)
     table.insert(command, "--expr")
     table.insert(command, nix_unit_expr(attr, attr_parts, position.nix_unit_kind, position.path))
+  elseif vm_interactive then
+    ---@cast attr_parts string[]
+    local build_command = { "nix", "build" }
+    vim.list_extend(build_command, nix_features)
+    vim.list_extend(build_command, { "--no-link", "--print-out-paths", "--no-write-lock-file" })
+    table.insert(
+      build_command,
+      ".#" .. render_attr_path(attr_parts, installable_attr_segment) .. ".driverInteractive"
+    )
+    command = driver_interactive_command(build_command)
   else
     ---@cast attr_parts string[]
     command = {
@@ -525,10 +614,14 @@ function M.build_spec(args, opts)
     table.insert(command, ".#" .. render_attr_path(attr_parts, installable_attr_segment))
   end
 
+  -- Not `vm_interactive and nil or run_strategy(...)`: with a nil middle term,
+  -- `and`/`or` chaining falls through to the right-hand side, which would
+  -- reattach the custom strategy exactly when it must be omitted.
+  local strategy = not vm_interactive and run_strategy(args.strategy) or nil
   local run_spec = {
-    command = with_extra_args(command, args.extra_args),
+    command = vm_interactive and command or with_extra_args(command, args.extra_args),
     cwd = cwd,
-    strategy = process.strategy,
+    strategy = strategy,
     context = {
       attr = context_attr,
       path = position.path,
@@ -538,8 +631,9 @@ function M.build_spec(args, opts)
     },
   }
   -- nix-unit reports per-attribute results that the final pass parses in full;
-  -- the streaming nix-error scanner only applies to plain `nix` runs.
-  if runner ~= "nix-unit" then
+  -- the streaming nix-error scanner only applies to plain `nix` runs. The
+  -- interactive driver session is a live REPL, not build output to scan.
+  if runner ~= "nix-unit" and not vm_interactive then
     run_spec.stream = results.stream(run_spec, tree)
   end
 

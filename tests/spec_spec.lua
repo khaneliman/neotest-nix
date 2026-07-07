@@ -654,6 +654,148 @@ describe("spec", function()
     assert.are.equal("nix", run.context.runner)
   end)
 
+  it("honours a named strategy by omitting the custom one", function()
+    local root = project()
+    local test = node({
+      attr_path = "checks.x86_64-linux.unit",
+      attr_path_parts = { "checks", "x86_64-linux", "unit" },
+      id = "unit",
+      name = "unit",
+      path = vim.fs.joinpath(root, "flake.nix"),
+      runner = "nix",
+      type = "test",
+    })
+
+    ---@type any
+    local run_args = { tree = test, strategy = "dap" }
+    local run = spec.build_spec(run_args)
+
+    assert.is_not_nil(run)
+    ---@cast run neotest.RunSpec
+    assert.is_nil(run.strategy)
+    -- Everything else about the spec (command, streaming) is unaffected by
+    -- which strategy will actually run it.
+    assert.is_function(run.stream)
+  end)
+
+  it("attaches the custom strategy when no strategy is named", function()
+    local root = project()
+    local test = node({
+      attr_path = "checks.x86_64-linux.unit",
+      attr_path_parts = { "checks", "x86_64-linux", "unit" },
+      id = "unit",
+      name = "unit",
+      path = vim.fs.joinpath(root, "flake.nix"),
+      runner = "nix",
+      type = "test",
+    })
+
+    local run = build_spec({ tree = test })
+
+    assert.is_function(run.strategy)
+  end)
+
+  it(
+    "builds the driverInteractive command for a VM-test check when vm_interactive is enabled",
+    function()
+      local root = project()
+      local test = node({
+        attr_path = "checks.x86_64-linux.vmTest",
+        attr_path_parts = { "checks", "x86_64-linux", "vmTest" },
+        id = "vmTest",
+        name = "vmTest",
+        path = vim.fs.joinpath(root, "flake.nix"),
+        runner = "nix",
+        test_script_range = { 1, 0, 5, 0 },
+        type = "test",
+      })
+
+      ---@type any
+      local run_args = { tree = test }
+      local run = spec.build_spec(run_args, { vm_interactive = true })
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.are.equal("sh", run.command[1])
+      assert.are.equal("-c", run.command[2])
+      local script = run.command[3]
+      assert.is_truthy(script:find("nix", 1, true))
+      assert.is_truthy(script:find("build", 1, true))
+      assert.is_truthy(script:find(".#checks.x86_64-linux.vmTest.driverInteractive", 1, true))
+      assert.is_truthy(script:find('exec "$out/bin/nixos-test-driver"', 1, true))
+      -- The interactive session needs a real terminal, so no custom strategy
+      -- (or streaming, which is for scanning build output) is attached.
+      assert.is_nil(run.strategy)
+      assert.is_nil(run.stream)
+    end
+  )
+
+  it(
+    "builds the driverInteractive command for a nixpkgs nixosTests position when vm_interactive is enabled",
+    function()
+      local root = project()
+      local path = vim.fs.joinpath(root, "nixos", "tests", "login.nix")
+      local test = node({
+        id = path,
+        name = "login.nix",
+        path = path,
+        runner = "nix",
+        nixpkgs_attr = "nixosTests.login",
+        test_script_range = { 1, 0, 5, 0 },
+        type = "file",
+      })
+
+      ---@type any
+      local run_args = { tree = test }
+      local run = spec.build_spec(run_args, { vm_interactive = true })
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.same({
+        "sh",
+        "-c",
+        "out=$('nix-build' '-A' 'nixosTests.login.driverInteractive' '--no-out-link')"
+          .. ' && exec "$out/bin/nixos-test-driver"',
+      }, run.command)
+      assert.is_nil(run.strategy)
+      assert.is_nil(run.stream)
+    end
+  )
+
+  it(
+    "builds the normal command for a non-VM position even when vm_interactive is enabled",
+    function()
+      local root = project()
+      local test = node({
+        attr_path = "checks.x86_64-linux.unit",
+        attr_path_parts = { "checks", "x86_64-linux", "unit" },
+        id = "unit",
+        name = "unit",
+        path = vim.fs.joinpath(root, "flake.nix"),
+        runner = "nix",
+        type = "test",
+      })
+
+      ---@type any
+      local run_args = { tree = test }
+      local run = spec.build_spec(run_args, { vm_interactive = true })
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.same({
+        "nix",
+        "build",
+        "--extra-experimental-features",
+        "nix-command flakes",
+        "--keep-going",
+        "--no-write-lock-file",
+        ".#checks.x86_64-linux.unit",
+      }, run.command)
+      assert.is_function(run.strategy)
+      assert.is_function(run.stream)
+    end
+  )
+
   it("does not build specs for directory positions", function()
     ---@type any
     local run_args = {
