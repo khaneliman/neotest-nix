@@ -82,6 +82,32 @@ describe("spec", function()
     assert.is_function(run.stream)
   end)
 
+  it("keeps flake.nix file runs on flake check when the flake mentions runTests", function()
+    local root = project()
+    local path = vim.fs.joinpath(root, "flake.nix")
+    vim.fn.writefile({
+      "{ outputs = { self }: { tests = lib.runTests { }; }; }",
+    }, path)
+    local tree = node({
+      id = "file",
+      name = "flake.nix",
+      path = path,
+      type = "file",
+    })
+
+    local run = build_spec({ tree = tree })
+
+    assert.same({
+      "nix",
+      "flake",
+      "check",
+      "--extra-experimental-features",
+      "nix-command flakes",
+      "--keep-going",
+      "--no-write-lock-file",
+    }, run.command)
+  end)
+
   it("builds a targeted check derivation for test positions", function()
     local root = project()
     local file = node({

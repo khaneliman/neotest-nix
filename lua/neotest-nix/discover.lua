@@ -425,7 +425,14 @@ function M.is_test_file(file_path, opts)
     return false
   end
 
-  return has_nix_unit_assertion(file_path)
+  if has_nix_unit_assertion(file_path) then
+    return true
+  end
+
+  -- Fallback for a `lib.runTests` file whose test bodies are built through a
+  -- shared helper, so no literal `expr`/`expected` keyword appears in this
+  -- file; a bare `runTests` call is still a strong enough signal.
+  return require("neotest-nix.runtests").is_runtests_file(file_path)
 end
 
 ---@param name string
@@ -460,5 +467,9 @@ function M.filter_dir(name, rel_path, root, opts)
 
   return true
 end
+
+-- Exported so runtests.lua can reuse the same comment/string-aware scan for
+-- its own lightweight `runTests` source heuristics, instead of duplicating it.
+M.strip_comments_and_strings = strip_nix_comments_and_strings
 
 return M

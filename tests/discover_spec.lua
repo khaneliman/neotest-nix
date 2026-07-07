@@ -308,4 +308,39 @@ describe("discover", function()
     -- that is what triggered a getFlake evaluation of the whole tree.
     assert.is_false(discover.is_test_file(helper))
   end)
+
+  it("falls back to a bare `runTests` call when no expr/expected keyword is present", function()
+    local tests_dir = vim.fs.joinpath(tmp, "tests")
+    mkdir(tests_dir)
+
+    -- Test bodies built through a shared helper defined elsewhere: neither
+    -- "expr" nor "expected"/"expectedError" appears literally in this file,
+    -- only the `runTests` call itself.
+    local helper_based = {
+      "let",
+      "  lib = (import <nixpkgs> { }).lib;",
+      "in",
+      "lib.runTests (mkCases [ 1 2 3 ])",
+    }
+    write_file(vim.fs.joinpath(tests_dir, "default.nix"), helper_based)
+    assert.is_true(discover.is_test_file(vim.fs.joinpath(tests_dir, "default.nix")))
+
+    local no_run_tests = { "{", "  foo = 1;", "}" }
+    write_file(vim.fs.joinpath(tests_dir, "plain.nix"), no_run_tests)
+    assert.is_false(discover.is_test_file(vim.fs.joinpath(tests_dir, "plain.nix")))
+  end)
+
+  it("ignores a `runTests` mention inside a comment for the fallback", function()
+    local tests_dir = vim.fs.joinpath(tmp, "tests")
+    mkdir(tests_dir)
+
+    local commented = {
+      "{",
+      "  # lib.runTests (mkCases [ 1 2 3 ])",
+      "  foo = 1;",
+      "}",
+    }
+    write_file(vim.fs.joinpath(tests_dir, "commented.nix"), commented)
+    assert.is_false(discover.is_test_file(vim.fs.joinpath(tests_dir, "commented.nix")))
+  end)
 end)

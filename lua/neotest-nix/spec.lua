@@ -500,6 +500,17 @@ function M.build_spec(args, opts)
     return run_spec
   end
 
+  -- Generic `lib.runTests` file outside a Nixpkgs checkout: try its own
+  -- eval command before the nix-unit paths below, which need `nix-unit` or a
+  -- flake mapping that a plain runTests file may not have.
+  local runtests = require("neotest-nix.runtests")
+  if vim.fs.basename(position.path) ~= "flake.nix" and runtests.is_runtests_file(position.path) then
+    local runtests_spec = runtests.build_spec(position, cwd, args.extra_args, opts, args.strategy)
+    if runtests_spec ~= nil then
+      return runtests_spec
+    end
+  end
+
   local attr_parts = check_attr_parts(tree)
   local attr = attr_parts ~= nil and table.concat(attr_parts, ".") or nil
   if
