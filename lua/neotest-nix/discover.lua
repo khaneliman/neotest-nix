@@ -558,6 +558,10 @@ function M.filter_dir(name, rel_path, root, opts)
     return false
   end
 
+  if is_file(vim.fs.joinpath(root, rel_path, "flake.nix")) then
+    return false
+  end
+
   return true
 end
 
