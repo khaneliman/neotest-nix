@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.3.0](https://github.com/khaneliman/neotest-nix/compare/v2.2.0...v2.3.0) (2026-07-08)
+
+
+### Features
+
+* **config:** add nix command options ([077374d](https://github.com/khaneliman/neotest-nix/commit/077374d2ed0edffcb346b85854d32ce08919cd46))
+* **discovery:** detect lib.runTests ([0222747](https://github.com/khaneliman/neotest-nix/commit/0222747f4249a08c458ae1ae80f22a7f6868a830))
+* **discovery:** support non-flake roots ([e27e3e6](https://github.com/khaneliman/neotest-nix/commit/e27e3e63e2b59893540b857f66d41baf1a72fb9e))
+* **namaka:** add snapshot runner support ([41a760c](https://github.com/khaneliman/neotest-nix/commit/41a760ccd50ec71784d0f7d9d45e13a93b6fb519))
+* **results:** append nix log tail ([6fcdd84](https://github.com/khaneliman/neotest-nix/commit/6fcdd84b86009231be9d9d6cdcc2b8703449be2c))
+* **results:** stream nix-unit output ([ac90aff](https://github.com/khaneliman/neotest-nix/commit/ac90aff36840bb248988246f38a64bfab5a88a03))
+* **spec:** honor named strategies ([239fa17](https://github.com/khaneliman/neotest-nix/commit/239fa170c19c961a90560ba6cf7ccc1c6fc9f3a9))
+* **vm:** discover standalone outputs ([d2c926e](https://github.com/khaneliman/neotest-nix/commit/d2c926e4da26a6e12542518059d391a1d0dbfde1))
+
+
+### Bug Fixes
+
+* **ci:** update test dependency lock ([9d4bb2c](https://github.com/khaneliman/neotest-nix/commit/9d4bb2cda10ad16619e65a52f26710abeb6e55fe))
+* **discovery:** avoid descending into nested flakes ([f0ed847](https://github.com/khaneliman/neotest-nix/commit/f0ed847f989f074df29a4722f4add3924d00413b))
+* **discovery:** handle quoted attrpaths ([73cc731](https://github.com/khaneliman/neotest-nix/commit/73cc7319069b9aec6308fc89880763e5e47f6c5f))
+* **discovery:** parse interpolated strings ([efc4b85](https://github.com/khaneliman/neotest-nix/commit/efc4b85bd4759ce72d537e296144c54a36c7830c))
+* **nixpkgs:** quote legacy attrs ([0288218](https://github.com/khaneliman/neotest-nix/commit/02882186161818f90d99341a76109c34fa5cd338))
+* **process:** preserve stream chunks ([119c763](https://github.com/khaneliman/neotest-nix/commit/119c763a24dd8e0ec73538779b98bf8fe0f52526))
+* **results:** parse store diagnostics ([5f192bf](https://github.com/khaneliman/neotest-nix/commit/5f192bf48ddbad9664fcd5751206b69655280e03))
+* **spec:** resolve dynamic systems ([1545269](https://github.com/khaneliman/neotest-nix/commit/1545269177ed61b110528386d7cc3ebb3e8913b9))
+* **test:** stub nix executable gate ([a15f734](https://github.com/khaneliman/neotest-nix/commit/a15f73494d188346b81d2335595299f767a3675b))
+
 ## [2.2.0](https://github.com/khaneliman/neotest-nix/compare/v2.1.6...v2.2.0) (2026-06-16)
 
 
