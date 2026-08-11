@@ -14,6 +14,7 @@
 local M = {}
 
 local uv = vim.uv
+local cache = require("neotest-nix.cache")
 
 ---@param path string
 ---@return boolean
@@ -755,11 +756,12 @@ local function collect_run_tests(root_node, source)
   return order, ranges
 end
 
--- Eval-discovered test names cached per file and invalidated by mtime, so
+-- Eval-discovered test names cached per file and invalidated by source
+-- fingerprint, so
 -- re-discovery (e.g. on save) does not re-run nix-instantiate unless the file
 -- changed. Failures are also cached so false positives do not trigger retries
 -- on every discovery event.
----@type table<string, { mtime: integer, names: string[]|false }>
+---@type table<string, { fingerprint: string, names: string[]|false }>
 local eval_names_cache = {}
 
 ---@param file_path string
@@ -769,10 +771,10 @@ local eval_names_cache = {}
 ---@return string[]?
 local function eval_test_names(file_path, root, attr, opts)
   local stat = uv.fs_stat(file_path)
-  local mtime = (stat ~= nil and stat.mtime ~= nil) and stat.mtime.sec or 0
+  local fingerprint = cache.fingerprint(stat)
 
   local cached = eval_names_cache[file_path]
-  if cached ~= nil and cached.mtime == mtime then
+  if cached ~= nil and cached.fingerprint == fingerprint then
     return cached.names or nil
   end
 
@@ -789,7 +791,7 @@ local function eval_test_names(file_path, root, attr, opts)
     )
   end
 
-  eval_names_cache[file_path] = { mtime = mtime, names = names or false }
+  eval_names_cache[file_path] = { fingerprint = fingerprint, names = names or false }
   return names
 end
 

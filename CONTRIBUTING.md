@@ -33,6 +33,7 @@ The Lua modules are deliberately small and single-purpose:
 - `positions.lua` — tree-sitter query loading and position building.
 - `eval.lua` — optional `nix eval` discovery of generated flake outputs.
 - `discover.lua` — root detection and "is this a test file?" rules.
+- `cache.lua` — shared file fingerprints for content-backed discovery caches.
 - `nixpkgs.lua` — Nixpkgs-checkout detection and legacy discovery for
   `pkgs/by-name` package tests, `lib/tests`, and `nixos/tests`.
 - `spec.lua` — turns a position into a `nix` / `nix build` / `nix-unit` run

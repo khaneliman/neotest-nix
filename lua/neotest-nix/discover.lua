@@ -1,6 +1,7 @@
 local M = {}
 
 local uv = vim.uv
+local cache = require("neotest-nix.cache")
 
 local excluded_dirs = {
   [".git"] = true,
@@ -437,9 +438,9 @@ local function source_has_passthru_tests(content)
   return content:find("tests%s*=") ~= nil
 end
 
--- Gate results cached per file and invalidated by mtime. Neotest re-runs
+-- Gate results cached per file and invalidated by source fingerprint. Neotest re-runs
 -- discovery on many events; without this every pass re-reads all ~21k packages.
----@type table<string, { mtime: integer, result: boolean }>
+---@type table<string, { fingerprint: string, result: boolean }>
 local passthru_cache = {}
 
 -- Cache whether roots are under /nix/store/
@@ -464,9 +465,9 @@ local function has_passthru_tests(file_path)
     return false
   end
 
-  local mtime = stat.mtime ~= nil and stat.mtime.sec or 0
+  local fingerprint = cache.fingerprint(stat)
   local cached = passthru_cache[file_path]
-  if cached ~= nil and cached.mtime == mtime then
+  if cached ~= nil and cached.fingerprint == fingerprint then
     return cached.result
   end
 
@@ -481,7 +482,7 @@ local function has_passthru_tests(file_path)
   end
 
   local result = source_has_passthru_tests(content)
-  passthru_cache[file_path] = { mtime = mtime, result = result }
+  passthru_cache[file_path] = { fingerprint = fingerprint, result = result }
   return result
 end
 

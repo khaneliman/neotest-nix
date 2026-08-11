@@ -325,6 +325,65 @@ describe("nixpkgs", function()
       assert.are.equal("computed.tests.beta", attrs.beta)
     end)
 
+    it("invalidates eval cache when nanoseconds or size change", function()
+      local root = nixpkgs_tree()
+      local pkg = write_package(root, "computed", {
+        "{ stdenv, callPackages }:",
+        "stdenv.mkDerivation { passthru.tests = callPackages ./tests.nix { }; }",
+      })
+
+      local original_fs_stat = vim.uv.fs_stat
+      local original_eval = package.loaded["neotest-nix.eval"]
+      local stat = { type = "file", size = 1, mtime = { sec = 10, nsec = 20 } }
+      local evaluations = 0
+
+      nixpkgs.clear_cache()
+      package.loaded["neotest-nix.eval"] = {
+        nixpkgs_test_names = function()
+          evaluations = evaluations + 1
+          return { "testAlpha" }
+        end,
+      }
+      vim.uv.fs_stat = function(path)
+        if path == pkg then
+          return stat
+        end
+        return original_fs_stat(path)
+      end
+      finally(function()
+        vim.uv.fs_stat = original_fs_stat
+        package.loaded["neotest-nix.eval"] = original_eval
+        nixpkgs.clear_cache()
+      end)
+
+      local opts = { discover_nixpkgs_eval_tests = true }
+      local first = eval_tests(nixpkgs.discover_positions(pkg, root, opts))
+      assert.is_not_nil(first.testAlpha)
+      assert.are.equal(1, evaluations)
+
+      nixpkgs.discover_positions(pkg, root, opts)
+      assert.are.equal(1, evaluations)
+
+      stat.mtime.nsec = 21
+      write_file(pkg, {
+        "{ stdenv, callPackages }:",
+        "stdenv.mkDerivation { passthru.tests = callPackages ./tests.nix { }; } # nsec",
+      })
+      nixpkgs.discover_positions(pkg, root, opts)
+      assert.are.equal(2, evaluations)
+
+      stat.size = 2
+      write_file(pkg, {
+        "{ stdenv, callPackages }:",
+        "stdenv.mkDerivation { passthru.tests = callPackages ./tests.nix { }; } # size",
+      })
+      nixpkgs.discover_positions(pkg, root, opts)
+      assert.are.equal(3, evaluations)
+
+      nixpkgs.discover_positions(pkg, root, opts)
+      assert.are.equal(3, evaluations)
+    end)
+
     it("does not eval when the option is disabled", function()
       local root = nixpkgs_tree()
       local pkg = write_package(root, "computed", {

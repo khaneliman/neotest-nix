@@ -396,6 +396,56 @@ describe("discover", function()
     assert.is_false(discover.is_test_file(plain))
   end)
 
+  it("invalidates passthru cache when nanoseconds or size change", function()
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "lib"), "p")
+    vim.fn.mkdir(vim.fs.joinpath(tmp, "nixos"), "p")
+    local pkg_dir = vim.fs.joinpath(tmp, "pkgs", "by-name", "he", "hello")
+    mkdir(pkg_dir)
+    local pkg = vim.fs.joinpath(pkg_dir, "package.nix")
+    write_file(pkg, { "{ stdenv }:", "stdenv.mkDerivation { passthru.tests = { }; }" })
+
+    local original_fs_stat = vim.uv.fs_stat
+    local original_io_open = rawget(io, "open")
+    local stat = { type = "file", size = 1, mtime = { sec = 10, nsec = 20 } }
+    local source_reads = 0
+
+    discover.clear_cache()
+    vim.uv.fs_stat = function(path)
+      if path == pkg then
+        return stat
+      end
+      return original_fs_stat(path)
+    end
+    rawset(io, "open", function(path, mode)
+      if path == pkg and mode == "r" then
+        source_reads = source_reads + 1
+      end
+      return original_io_open(path, mode)
+    end)
+    finally(function()
+      vim.uv.fs_stat = original_fs_stat
+      rawset(io, "open", original_io_open)
+      discover.clear_cache()
+    end)
+
+    assert.is_true(discover.is_test_file(pkg))
+    assert.is_true(discover.is_test_file(pkg))
+    assert.are.equal(1, source_reads)
+
+    stat.mtime.nsec = 21
+    write_file(pkg, { "{ stdenv }:", "stdenv.mkDerivation { passthru.tests = { }; } # nsec" })
+    assert.is_true(discover.is_test_file(pkg))
+    assert.are.equal(2, source_reads)
+
+    stat.size = 2
+    write_file(pkg, { "{ stdenv }:", "stdenv.mkDerivation { passthru.tests = { }; } # size" })
+    assert.is_true(discover.is_test_file(pkg))
+    assert.are.equal(3, source_reads)
+
+    assert.is_true(discover.is_test_file(pkg))
+    assert.are.equal(3, source_reads)
+  end)
+
   it("prunes unsupported directories on a Nixpkgs root", function()
     vim.fn.mkdir(vim.fs.joinpath(tmp, "lib"), "p")
     vim.fn.mkdir(vim.fs.joinpath(tmp, "nixos"), "p")
