@@ -218,6 +218,51 @@ local function marker_dir(start, marker, marker_type)
   return found ~= nil and vim.fs.dirname(found) or nil
 end
 
+local gitfile_prefix = "gitdir: "
+local gitfile_read_limit = 4096
+
+---@param path string
+---@return boolean
+local function is_gitfile(path)
+  local file = io.open(path, "r")
+  if file == nil then
+    return false
+  end
+
+  local chunk = file:read(gitfile_read_limit)
+  file:close()
+  if chunk == nil or chunk:sub(1, #gitfile_prefix) ~= gitfile_prefix then
+    return false
+  end
+
+  local newline = chunk:find("[\r\n]")
+  local target_end = newline ~= nil and newline - 1 or #chunk
+  return chunk:sub(#gitfile_prefix + 1, target_end):find("%S") ~= nil
+end
+
+---@param start string
+---@return string?
+local function git_root(start)
+  local current = start
+  while current ~= nil and current ~= "" do
+    local marker = vim.fs.joinpath(current, ".git")
+    local stat = uv.fs_lstat(marker)
+    if stat ~= nil then
+      if stat.type == "directory" or (stat.type == "file" and is_gitfile(marker)) then
+        return current
+      end
+    end
+
+    local parent = dirname(current)
+    if parent == current then
+      break
+    end
+    current = parent
+  end
+
+  return nil
+end
+
 ---@param normalized string
 ---@return string?
 local function existing_start(normalized)
@@ -332,8 +377,7 @@ function M.root(dir, opts)
   end
 
   if recognized_non_flake_test_file(normalized) then
-    local git_root = marker_dir(start, ".git", "directory")
-    return git_root or vim.fs.dirname(normalized)
+    return git_root(start) or vim.fs.dirname(normalized)
   end
 
   return nil

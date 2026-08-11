@@ -38,6 +38,124 @@ describe("discover", function()
     assert.is_true(discover.is_test_file(path))
   end)
 
+  it("roots non-flake test files at a gitfile root", function()
+    local project = vim.fs.joinpath(tmp, "project")
+    local tests = vim.fs.joinpath(project, "tests")
+    mkdir(tests)
+    write_file(vim.fs.joinpath(project, ".git"), { "gitdir: /git/worktrees/project with spaces" })
+    local path = vim.fs.joinpath(tests, "default.nix")
+    write_file(path, { "{", "  testFoo = { expr = 1; expected = 1; };", "}" })
+
+    assert.are.equal(project, discover.root(path))
+    assert.is_true(discover.is_test_file(path))
+  end)
+
+  it("ignores an unrelated nearer gitfile and finds the parent git root", function()
+    local project = vim.fs.joinpath(tmp, "project")
+    local nested = vim.fs.joinpath(project, "nested")
+    local tests = vim.fs.joinpath(nested, "tests")
+    mkdir(tests)
+    mkdir(vim.fs.joinpath(project, ".git"))
+    write_file(vim.fs.joinpath(nested, ".git"), { "not a git directory" })
+    local path = vim.fs.joinpath(tests, "default.nix")
+    write_file(path, { "{", "  testFoo = { expr = 1; expected = 1; };", "}" })
+
+    assert.are.equal(project, discover.root(path))
+  end)
+
+  it("uses the nearest valid gitfile for nested non-flake tests", function()
+    local outer = vim.fs.joinpath(tmp, "outer")
+    local project = vim.fs.joinpath(outer, "project")
+    local tests = vim.fs.joinpath(project, "tests", "nested")
+    mkdir(tests)
+    write_file(vim.fs.joinpath(outer, ".git"), { "gitdir: /git/worktrees/outer" })
+    write_file(vim.fs.joinpath(project, ".git"), { "gitdir: /git/modules/project" })
+    local path = vim.fs.joinpath(tests, "nested_test.nix")
+    write_file(path, { "{", "  testFoo = { expr = 1; expected = 1; };", "}" })
+
+    assert.are.equal(project, discover.root(path))
+  end)
+
+  it("ignores malformed nearer gitfiles and finds the parent git root", function()
+    local project = vim.fs.joinpath(tmp, "project")
+    local whitespace = vim.fs.joinpath(project, "whitespace")
+    local tabbed = vim.fs.joinpath(whitespace, "tabbed")
+    local tests = vim.fs.joinpath(tabbed, "tests")
+    mkdir(vim.fs.joinpath(project, ".git"))
+    mkdir(tests)
+    write_file(vim.fs.joinpath(whitespace, ".git"), { "gitdir:    " })
+    write_file(vim.fs.joinpath(tabbed, ".git"), { "gitdir:\t/git/worktrees/tabbed" })
+    local path = vim.fs.joinpath(tests, "default.nix")
+    write_file(path, { "{", "  testFoo = { expr = 1; expected = 1; };", "}" })
+
+    assert.are.equal(project, discover.root(path))
+  end)
+
+  it("ignores a nearer git symlink and finds the parent git root", function()
+    local project = vim.fs.joinpath(tmp, "project")
+    local nested = vim.fs.joinpath(project, "nested")
+    local tests = vim.fs.joinpath(nested, "tests")
+    local parent_marker = vim.fs.joinpath(project, ".git")
+    mkdir(parent_marker)
+    mkdir(tests)
+    local linked, err = vim.uv.fs_symlink(parent_marker, vim.fs.joinpath(nested, ".git"))
+    if linked == nil then
+      -- busted's `pending` stub only declares a 2-arg overload; the 1-arg
+      -- form used here is valid busted usage that just skips with a message.
+      ---@diagnostic disable-next-line: missing-parameter
+      pending("symlink fixture unavailable: " .. tostring(err))
+    end
+    local path = vim.fs.joinpath(tests, "default.nix")
+    write_file(path, { "{", "  testFoo = { expr = 1; expected = 1; };", "}" })
+
+    assert.are.equal(project, discover.root(path))
+  end)
+
+  it("enforces the gitfile read bound and finds the parent git root", function()
+    local project = vim.fs.joinpath(tmp, "project")
+    local nested = vim.fs.joinpath(project, "nested")
+    local tests = vim.fs.joinpath(nested, "tests")
+    mkdir(vim.fs.joinpath(project, ".git"))
+    mkdir(tests)
+    vim.fn.writefile(
+      { "gitdir: " .. string.rep(" ", 4088) .. "/target" .. string.rep("x", 128 * 1024) },
+      vim.fs.joinpath(nested, ".git"),
+      "b"
+    )
+    local path = vim.fs.joinpath(tests, "default.nix")
+    write_file(path, { "{", "  testFoo = { expr = 1; expected = 1; };", "}" })
+
+    assert.are.equal(project, discover.root(path))
+  end)
+
+  it("prefers a flake root over a nearer gitfile", function()
+    local flake = vim.fs.joinpath(tmp, "flake")
+    local project = vim.fs.joinpath(flake, "project")
+    local tests = vim.fs.joinpath(project, "tests")
+    mkdir(tests)
+    write_file(vim.fs.joinpath(flake, "flake.nix"), { "{}" })
+    write_file(vim.fs.joinpath(project, ".git"), { "gitdir: /git/worktrees/project" })
+    local path = vim.fs.joinpath(tests, "default.nix")
+    write_file(path, { "{", "  testFoo = { expr = 1; expected = 1; };", "}" })
+
+    assert.are.equal(flake, discover.root(path))
+  end)
+
+  it("prefers a Nixpkgs root over a nearer gitfile", function()
+    local nixpkgs = vim.fs.joinpath(tmp, "nixpkgs")
+    local project = vim.fs.joinpath(nixpkgs, "project")
+    local tests = vim.fs.joinpath(project, "tests")
+    mkdir(vim.fs.joinpath(nixpkgs, "lib"))
+    mkdir(vim.fs.joinpath(nixpkgs, "nixos"))
+    mkdir(vim.fs.joinpath(nixpkgs, "pkgs", "by-name"))
+    mkdir(tests)
+    write_file(vim.fs.joinpath(project, ".git"), { "gitdir: /git/worktrees/project" })
+    local path = vim.fs.joinpath(tests, "default.nix")
+    write_file(path, { "{", "  testFoo = { expr = 1; expected = 1; };", "}" })
+
+    assert.are.equal(nixpkgs, discover.root(path))
+  end)
+
   it("falls back to the file parent for recognized non-flake tests without git", function()
     local tests = vim.fs.joinpath(tmp, "tests")
     mkdir(tests)
