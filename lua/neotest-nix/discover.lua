@@ -387,17 +387,7 @@ end
 ---@param file_path string
 ---@return boolean
 has_nix_unit_assertion = function(file_path)
-  local stat = uv.fs_stat(file_path)
-  if stat == nil or stat.type ~= "file" then
-    return false
-  end
-
-  local file = io.open(file_path, "r")
-  if file == nil then
-    return false
-  end
-  local content = file:read("*a")
-  file:close()
+  local content = cache.read_source(file_path)
   if content == nil then
     return false
   end
@@ -450,6 +440,7 @@ local store_root_cache = {}
 function M.clear_cache()
   passthru_cache = {}
   store_root_cache = {}
+  cache.clear_source_cache()
 end
 
 ---Cheap gate for a Nixpkgs `package.nix`: does it declare `passthru.tests`? The

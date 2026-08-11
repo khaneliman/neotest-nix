@@ -446,6 +446,94 @@ describe("discover", function()
     assert.are.equal(3, source_reads)
   end)
 
+  it("shares source reads between nix-unit and runTests classification", function()
+    local path = vim.fs.joinpath(tmp, "runTests_test.nix")
+    write_file(path, { "lib.runTests { testFoo = { }; }" })
+
+    local original_fs_stat = vim.uv.fs_stat
+    local original_io_open = rawget(io, "open")
+    local source_reads = 0
+    discover.clear_cache()
+    vim.uv.fs_stat = function(file_path)
+      if file_path == path then
+        return { type = "file", size = 1, mtime = { sec = 10, nsec = 20 } }
+      end
+      return original_fs_stat(file_path)
+    end
+    rawset(io, "open", function(file_path, mode)
+      if file_path == path and mode == "r" then
+        source_reads = source_reads + 1
+      end
+      return original_io_open(file_path, mode)
+    end)
+    finally(function()
+      vim.uv.fs_stat = original_fs_stat
+      rawset(io, "open", original_io_open)
+      discover.clear_cache()
+    end)
+
+    assert.is_true(discover.is_test_file(path))
+    assert.are.equal(1, source_reads)
+  end)
+
+  it("rereads classification source after a fingerprint change", function()
+    local path = vim.fs.joinpath(tmp, "runTests_test.nix")
+    write_file(path, { "lib.runTests { testFoo = { }; }" })
+
+    local original_fs_stat = vim.uv.fs_stat
+    local original_io_open = rawget(io, "open")
+    local stat = { type = "file", size = 1, mtime = { sec = 10, nsec = 20 } }
+    local source_reads = 0
+    discover.clear_cache()
+    vim.uv.fs_stat = function(file_path)
+      if file_path == path then
+        return stat
+      end
+      return original_fs_stat(file_path)
+    end
+    rawset(io, "open", function(file_path, mode)
+      if file_path == path and mode == "r" then
+        source_reads = source_reads + 1
+      end
+      return original_io_open(file_path, mode)
+    end)
+    finally(function()
+      vim.uv.fs_stat = original_fs_stat
+      rawset(io, "open", original_io_open)
+      discover.clear_cache()
+    end)
+
+    assert.is_true(discover.is_test_file(path))
+    stat.mtime.nsec = 21
+    write_file(path, { "{ testFoo = { }; }" })
+    assert.is_false(discover.is_test_file(path))
+    assert.are.equal(2, source_reads)
+  end)
+
+  it("clears cached source with discovery cache", function()
+    local path = vim.fs.joinpath(tmp, "runTests_test.nix")
+    write_file(path, { "lib.runTests { testFoo = { }; }" })
+
+    local original_io_open = rawget(io, "open")
+    local source_reads = 0
+    discover.clear_cache()
+    rawset(io, "open", function(file_path, mode)
+      if file_path == path and mode == "r" then
+        source_reads = source_reads + 1
+      end
+      return original_io_open(file_path, mode)
+    end)
+    finally(function()
+      rawset(io, "open", original_io_open)
+      discover.clear_cache()
+    end)
+
+    assert.is_true(discover.is_test_file(path))
+    discover.clear_cache()
+    assert.is_true(discover.is_test_file(path))
+    assert.are.equal(2, source_reads)
+  end)
+
   it("prunes unsupported directories on a Nixpkgs root", function()
     vim.fn.mkdir(vim.fs.joinpath(tmp, "lib"), "p")
     vim.fn.mkdir(vim.fs.joinpath(tmp, "nixos"), "p")

@@ -26,10 +26,9 @@
 
 local eval = require("neotest-nix.eval")
 local process = require("neotest-nix.process")
+local cache = require("neotest-nix.cache")
 
 local M = {}
-
-local uv = vim.uv
 
 local nix_command_features = {
   "--extra-experimental-features",
@@ -67,18 +66,7 @@ end
 ---@param value string
 ---@return string
 local function read_as_content(value)
-  local stat = uv.fs_stat(value)
-  if stat == nil or stat.type ~= "file" then
-    return value
-  end
-
-  local file = io.open(value, "r")
-  if file == nil then
-    return value
-  end
-  local content = file:read("*a")
-  file:close()
-  return content or value
+  return cache.read_source(value) or value
 end
 
 ---Whether stripped Nix source contains a bare `runTests` call (`runTests
@@ -136,13 +124,7 @@ end
 ---@param file_path string
 ---@return string?
 local function read_file(file_path)
-  local file = io.open(file_path, "r")
-  if file == nil then
-    return nil
-  end
-  local content = file:read("*a")
-  file:close()
-  return content
+  return cache.read_source(file_path)
 end
 
 ---Build the whole-suite eval command for a `lib.runTests` file.

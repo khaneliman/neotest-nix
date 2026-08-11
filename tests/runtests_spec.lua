@@ -1,4 +1,5 @@
 local runtests = require("neotest-nix.runtests")
+local discover = require("neotest-nix.discover")
 local eval = require("neotest-nix.eval")
 local results = require("neotest-nix.results")
 
@@ -105,9 +106,97 @@ describe("runtests", function()
       ---@diagnostic disable-next-line: param-type-mismatch
       assert.is_false(runtests.is_runtests_file(nil))
     end)
+
+    it("keeps raw source input independent from file-source caching", function()
+      local original_io_open = rawget(io, "open")
+      local source_reads = 0
+      rawset(io, "open", function(path, mode)
+        if mode == "r" then
+          source_reads = source_reads + 1
+        end
+        return original_io_open(path, mode)
+      end)
+      finally(function()
+        rawset(io, "open", original_io_open)
+        discover.clear_cache()
+      end)
+
+      assert.is_true(runtests.is_runtests_file("lib.runTests { testFoo = { }; }"))
+      assert.are.equal(0, source_reads)
+    end)
+
+    it("does not cache a failed source open", function()
+      local original_io_open = rawget(io, "open")
+      local source_reads = 0
+      local fail_once = true
+      discover.clear_cache()
+      rawset(io, "open", function(path, mode)
+        if path == zero_arg_fixture and mode == "r" then
+          source_reads = source_reads + 1
+          if fail_once then
+            fail_once = false
+            return nil
+          end
+        end
+        return original_io_open(path, mode)
+      end)
+      finally(function()
+        rawset(io, "open", original_io_open)
+        discover.clear_cache()
+      end)
+
+      assert.is_false(runtests.is_runtests_file(zero_arg_fixture))
+      assert.is_true(runtests.is_runtests_file(zero_arg_fixture))
+      assert.are.equal(2, source_reads)
+    end)
   end)
 
   describe("build_spec", function()
+    it("reuses source for classification and build-spec construction", function()
+      local false_path = vim.fs.joinpath(vim.fn.tempname(), "classification_test.nix")
+      vim.fn.mkdir(vim.fs.dirname(false_path), "p")
+      vim.fn.writefile({ "{ testFoo = { }; }" }, false_path)
+      local original_io_open = rawget(io, "open")
+      local source_reads = 0
+      discover.clear_cache()
+      rawset(io, "open", function(path, mode)
+        if (path == function_fixture or path == false_path) and mode == "r" then
+          source_reads = source_reads + 1
+        end
+        return original_io_open(path, mode)
+      end)
+      finally(function()
+        rawset(io, "open", original_io_open)
+        discover.clear_cache()
+      end)
+
+      assert.is_true(discover.is_test_file(function_fixture))
+      assert.is_true(runtests.is_runtests_file(function_fixture))
+      -- build_spec only reads id/path/type; range/total_range are always set
+      -- by real tree-sitter discovery but aren't needed here.
+      ---@diagnostic disable-next-line: missing-fields
+      local run = runtests.build_spec({
+        id = function_fixture,
+        path = function_fixture,
+        type = "file",
+      }, fixtures)
+
+      assert.is_not_nil(run)
+      ---@cast run neotest.RunSpec
+      assert.are.equal("eval", run.command[2])
+      assert.are.equal(1, source_reads)
+
+      assert.is_false(discover.is_test_file(false_path))
+      assert.is_false(runtests.is_runtests_file(false_path))
+      local false_run =
+        ---@diagnostic disable-next-line: missing-fields
+        runtests.build_spec({ id = false_path, path = false_path, type = "file" }, fixtures)
+      assert.is_not_nil(false_run)
+      ---@cast false_run neotest.RunSpec
+      assert.are.equal("nix-instantiate", false_run.command[1])
+      assert.are.equal(2, source_reads)
+    end)
+
     it("builds a nix-instantiate command for a zero-arg file", function()
       -- build_spec only reads id/path/type; range/total_range are always set
       -- by real tree-sitter discovery but aren't needed by the code under test.
