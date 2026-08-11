@@ -11,8 +11,8 @@
 ---    tests with a `testScript`. Run with `nix`.
 ---  - nix-unit tests: attribute sets shaped `{ expr = ...; expected = ...; }`
 ---    (or `expectedError`). Run with `nix-unit`.
----  - Namaka snapshot tests: `namaka.toml` projects and `tests/**/expr.nix`
----    files. Run with `namaka check`.
+---  - Namaka snapshot tests: `namaka.toml` projects and any `expr.nix` beneath
+---    the project root, except inside `_snapshots`. Run with `namaka check`.
 ---
 ---Run |:checkhealth| neotest-nix to verify your setup.
 ---@brief ]]
@@ -225,8 +225,8 @@
 ---    parent directory contains `test` AND it contains a nix-unit assertion
 ---    (`expr` plus `expected` or `expectedError`). This covers both
 ---    `foo_test.nix` and the common `tests/default.nix` layout.
----  - Namaka projects expose `namaka.toml` and `tests/**/expr.nix` files under
----    that root, excluding `_snapshots` directories. Namaka runs at project/file
+---  - Namaka projects expose `namaka.toml` and any `expr.nix` beneath that root,
+---    excluding `_snapshots` directories. Namaka runs at project/file
 ---    granularity; individual snapshot cases are not parsed.
 ---  - nix-unit assertions are discovered when their value has nix-unit shape
 ---    (`expr` plus `expected` or `expectedError`). Attribute names do not need

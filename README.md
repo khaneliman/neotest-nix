@@ -13,8 +13,9 @@ It discovers four kinds of tests and runs them in place:
   tests with a `testScript`. Run with `nix`.
 - **nix-unit tests** — attribute sets shaped `{ expr = ...; expected = ...; }`
   (or `expectedError`). Run with [`nix-unit`](https://github.com/nix-community/nix-unit).
-- **Namaka snapshot tests** — `namaka.toml` projects and `tests/**/expr.nix`
-  files. Run with [`namaka`](https://github.com/nix-community/namaka).
+- **Namaka snapshot tests** — `namaka.toml` projects and any `expr.nix` beneath
+  the project root, except inside `_snapshots`. Run with
+  [`namaka`](https://github.com/nix-community/namaka).
 - **Nixpkgs checkouts** — `pkgs/by-name` `passthru.tests`, `lib/tests`
   eval and build tests, and `nixos/tests` VM tests. Run with legacy commands
   (`nix-build`/`nix-instantiate`) that evaluate the working tree in place.
@@ -216,8 +217,8 @@ require("neotest-nix")({
   assertion (`expr` plus `expected` or `expectedError`). This covers both
   `foo_test.nix` and the common `tests/default.nix` layout. A `lib.nix` holding
   nix-unit tests outside a `test`-named file or directory is not discovered.
-- Namaka projects expose `namaka.toml` and `tests/**/expr.nix` under the
-  Namaka root. `_snapshots` directories are skipped. Namaka runs at file/project
+- Namaka projects expose `namaka.toml` and any `expr.nix` beneath the Namaka
+  root. `_snapshots` directories are skipped. Namaka runs at file/project
   granularity; individual snapshot cases are not parsed.
 - nix-unit assertions are surfaced as individual positions when their value has
   nix-unit shape (`expr` plus `expected` or `expectedError`). Attribute names do
