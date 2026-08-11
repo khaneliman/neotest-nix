@@ -1,5 +1,6 @@
 local M = {}
 
+local config = require("neotest-nix.config")
 local uv = vim.uv
 local health = vim.health
 
@@ -209,6 +210,14 @@ local function check_config()
       elseif output.match ~= nil and type(output.match) ~= "string" then
         valid = false
         health.error(("eval_outputs[%d].match must be a string"):format(index))
+      elseif output.match ~= nil then
+        local pattern_valid, err = config.validate_pattern(output.match)
+        if not pattern_valid then
+          valid = false
+          health.error(
+            ("eval_outputs[%d].match must be a valid Lua pattern: %s"):format(index, err)
+          )
+        end
       end
     end
   end

@@ -30,6 +30,8 @@ The Lua modules are deliberately small and single-purpose:
 - `init.lua` — adapter entry point; wires the modules together and exposes the
   Neotest hooks (`root`, `is_test_file`, `build_spec`, `results`, …) plus
   `setup`.
+- `config.lua` — shared protected validation for user-supplied configuration
+  values.
 - `positions.lua` — tree-sitter query loading and position building.
 - `eval.lua` — optional `nix eval` discovery of generated flake outputs.
 - `discover.lua` — root detection and "is this a test file?" rules.

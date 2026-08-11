@@ -3,6 +3,24 @@
 -- dependency/binary checks still run but their messages are ignored.
 
 describe("health config check", function()
+  local malformed_patterns = {
+    "[",
+    "a[",
+    "^a[",
+    "[a%",
+    "a%",
+    "a(",
+    "a)",
+    "%b",
+    "%ba",
+    "%f",
+    "%fa",
+    "%f[",
+    "%f[]",
+    "%0",
+    "(a%1)",
+  }
+
   local recorded
   local real_health
 
@@ -74,10 +92,22 @@ describe("health config check", function()
     assert.is_true(any_match(recorded.error, "eval_outputs%[1%]"))
   end)
 
+  it("errors on a malformed eval_outputs match pattern", function()
+    for _, pattern in ipairs(malformed_patterns) do
+      recorded.ok = {}
+      recorded.warn = {}
+      recorded.error = {}
+
+      check_with_opts({ eval_outputs = { { attr = "checks", match = pattern } } })
+      assert.is_true(any_match(recorded.error, "eval_outputs%[1%]%.match"))
+      assert.is_false(any_match(recorded.ok, "configuration looks valid"))
+    end
+  end)
+
   it("reports a valid configuration", function()
     check_with_opts({
       discover_eval_checks = true,
-      eval_outputs = { { attr = "checks" } },
+      eval_outputs = { { attr = "checks", match = "%f[%w]test[%w_]*" } },
       non_flake_roots = true,
       namaka_extra_args = { "--show-trace" },
     })

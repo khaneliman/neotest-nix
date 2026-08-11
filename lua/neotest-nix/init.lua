@@ -1,4 +1,5 @@
 local discover = require("neotest-nix.discover")
+local config = require("neotest-nix.config")
 local display = require("neotest-nix.display")
 local eval = require("neotest-nix.eval")
 local parser = require("neotest-nix.parser")
@@ -154,6 +155,12 @@ local function validate(opts)
       vim.validate(("eval_outputs[%d]"):format(index), output, "table")
       vim.validate(("eval_outputs[%d].attr"):format(index), output.attr, "string")
       vim.validate(("eval_outputs[%d].match"):format(index), output.match, "string", true)
+      if output.match ~= nil then
+        local valid, err = config.validate_pattern(output.match)
+        if not valid then
+          error(("eval_outputs[%d].match must be a valid Lua pattern: %s"):format(index, err))
+        end
+      end
     end
   end
 

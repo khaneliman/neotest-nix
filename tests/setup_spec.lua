@@ -133,6 +133,36 @@ describe("adapter integrates with neotest", function()
 end)
 
 describe("config validation", function()
+  local malformed_patterns = {
+    { pattern = "[", error = "unclosed character class at byte 1" },
+    { pattern = "a[", error = "unclosed character class at byte 2" },
+    { pattern = "^a[", error = "unclosed character class at byte 3" },
+    { pattern = "[a%", error = "escape in character class at byte 3 cannot terminate pattern" },
+    { pattern = "a%", error = "escape at byte 2 cannot terminate pattern" },
+    { pattern = "a(", error = "unclosed capture at byte 2" },
+    { pattern = "a)", error = "unmatched ')' at byte 2" },
+    { pattern = "%b", error = "%b at byte 1 requires two delimiters" },
+    { pattern = "%ba", error = "%b at byte 1 requires two delimiters" },
+    { pattern = "%f", error = "%f at byte 1 must be followed by a character class" },
+    { pattern = "%fa", error = "%f at byte 1 must be followed by a character class" },
+    { pattern = "%f[", error = "unclosed character class at byte 3" },
+    { pattern = "%f[]", error = "unclosed character class at byte 3" },
+    { pattern = "%0", error = "capture reference %0 at byte 1 has no closed capture" },
+    { pattern = "(a%1)", error = "capture reference %1 at byte 3 has no closed capture" },
+  }
+
+  local valid_patterns = {
+    "%f[%w]test[%w_]*",
+    "^[%[%]%%]+$",
+    "[]a%-]+",
+    "^(ab())%1$",
+    "%b()",
+    "%b%%",
+    "%(%a+%)",
+    "%f[]]",
+    "%f[^]]",
+  }
+
   before_each(function()
     package.loaded["neotest-nix"] = nil
     vim.opt.runtimepath:prepend(vim.fn.getcwd())
@@ -151,7 +181,7 @@ describe("config validation", function()
       adapter.setup({
         parser_runtime_paths = { "/tmp/nix-parser" },
         discover_eval_checks = true,
-        eval_outputs = { { attr = "checks", match = "^test" } },
+        eval_outputs = { { attr = "checks", match = "^%f[%w]test[%w_]*$" } },
         nix_unit_flakes = { { path = "lib/tests", flake = ".#tests" } },
         nixpkgs_mode = true,
         discover_nixpkgs_eval_tests = true,
@@ -215,6 +245,28 @@ describe("config validation", function()
     })
 
     assert.is_truthy(err:find("eval_outputs[1].attr", 1, true))
+  end)
+
+  it("rejects malformed eval_outputs match patterns", function()
+    for _, case in ipairs(malformed_patterns) do
+      local err = setup_error({
+        eval_outputs = { { attr = "checks", match = case.pattern } },
+      })
+
+      assert.is_truthy(err:find("eval_outputs[1].match", 1, true))
+      assert.is_truthy(err:find(case.error, 1, true))
+    end
+  end)
+
+  it("accepts valid Lua eval_outputs match patterns", function()
+    local adapter = require("neotest-nix")
+    for _, pattern in ipairs(valid_patterns) do
+      assert.has_no.errors(function()
+        adapter.setup({
+          eval_outputs = { { attr = "checks", match = pattern } },
+        })
+      end)
+    end
   end)
 
   it("rejects non-table nix_unit_flakes entries", function()
