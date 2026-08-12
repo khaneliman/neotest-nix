@@ -41,6 +41,16 @@ function M.fixture_is_git_tracked(dir)
   return vim.v.shell_error == 0 and vim.trim(output) ~= ""
 end
 
+---@param command string
+---@return boolean
+local function command_succeeded(command)
+  local result, reason, code = os.execute(command)
+  if type(result) == "boolean" then
+    return result
+  end
+  return result == 0 or (reason == "exit" and code == 0)
+end
+
 ---Copy a committed fixture flake into a throwaway directory and initialize a
 ---throwaway Git repo there (`git init` + `git add -A`, no commit). Real `nix`
 ---refuses to evaluate a local flake whose files are not visible to Git
@@ -66,13 +76,13 @@ function M.materialize_fixture(fixture_name)
   local dir = vim.fn.tempname()
   vim.fn.mkdir(dir, "p")
 
-  local ok = os.execute(("cp -r %s/. %s/"):format(vim.fn.shellescape(src), vim.fn.shellescape(dir)))
+  local ok = command_succeeded(("cp -r %s/. %s/"):format(vim.fn.shellescape(src), vim.fn.shellescape(dir)))
   assert(ok, ("neotest-nix integration: failed to copy fixture `%s`"):format(fixture_name))
 
   local init_cmd = ("cd %s && git init -q && git -c user.email=neotest-nix@example.com "):format(
     vim.fn.shellescape(dir)
   ) .. "-c user.name=neotest-nix add -A"
-  ok = os.execute(init_cmd)
+  ok = command_succeeded(init_cmd)
   assert(
     ok,
     ("neotest-nix integration: failed to stage fixture `%s` for Git-aware nix evaluation"):format(
