@@ -970,6 +970,42 @@ local function nix_unit_stream_result(entry)
   }
 end
 
+---@param entry neotest-nix.NixUnitStreamEntry
+---@param state neotest-nix.NixUnitStreamState
+---@param changed table<string, neotest.Result>
+local function publish_nix_unit_stream_result(entry, state, changed)
+  if entry.position_id == nil or not entry.owns_result then
+    return
+  end
+
+  local result = nix_unit_stream_result(entry)
+  local previous = state.results[entry.position_id]
+  -- A repeated failure marker can precede another system's detail block.
+  -- Keep the earlier useful message until the new block has content.
+  if
+    #entry.lines == 0
+    and previous ~= nil
+    and previous.status == "failed"
+    and result.status == "failed"
+  then
+    return
+  end
+  if previous == nil or previous.status ~= result.status or previous.short ~= result.short then
+    state.results[entry.position_id] = result
+    changed[entry.position_id] = result
+  end
+end
+
+---@param state neotest-nix.NixUnitStreamState
+---@param changed table<string, neotest.Result>
+local function finish_nix_unit_stream_entry(state, changed)
+  if state.current == nil then
+    return
+  end
+  publish_nix_unit_stream_result(state.current, state, changed)
+  state.current = nil
+end
+
 ---Process complete nix-unit lines once and return only changed positions.
 ---The final whole-output parser remains authoritative after process exit.
 ---@param lines string[]
@@ -982,6 +1018,7 @@ local function parse_nix_unit_stream_lines(lines, positions, state)
     local line = strip_ansi(raw_line)
     local status, name = nix_unit_marker(line)
     if status ~= nil and name ~= nil then
+      finish_nix_unit_stream_entry(state, changed)
       local position = match_nix_unit_position(positions, name)
       local position_id = position ~= nil and position.id or nil
       local existing = position_id ~= nil and state.results[position_id] or nil
@@ -992,20 +1029,11 @@ local function parse_nix_unit_stream_lines(lines, positions, state)
         position_id = position_id,
         owns_result = position_id ~= nil and (status == "failed" or existing == nil),
       }
+      publish_nix_unit_stream_result(state.current, state, changed)
     elseif nix_unit_summary(line) then
-      state.current = nil
+      finish_nix_unit_stream_entry(state, changed)
     elseif state.current ~= nil then
       state.current.lines[#state.current.lines + 1] = line
-    end
-
-    local current = state.current
-    if current ~= nil and current.position_id ~= nil and current.owns_result then
-      local result = nix_unit_stream_result(current)
-      local previous = state.results[current.position_id]
-      if previous == nil or previous.status ~= result.status or previous.short ~= result.short then
-        state.results[current.position_id] = result
-        changed[current.position_id] = result
-      end
     end
   end
   return changed
@@ -1014,7 +1042,6 @@ end
 ---@class neotest-nix.StreamInputState
 ---@field pending string
 ---@field marker_pending string
----@field output string[]
 ---@field finished boolean
 
 ---@param state neotest-nix.StreamInputState
@@ -1025,18 +1052,13 @@ end
 local function consume_stream_chunk(state, chunk, end_marker)
   local complete_lines = {}
   if type(chunk) == "table" then
-    local output_lines = {}
     local ended = false
     for _, line in ipairs(chunk) do
       if end_marker ~= nil and line == end_marker then
         ended = true
         break
       end
-      output_lines[#output_lines + 1] = line
       complete_lines[#complete_lines + 1] = line
-    end
-    if #output_lines > 0 then
-      state.output[#state.output + 1] = table.concat(output_lines, "\n") .. "\n"
     end
     return complete_lines, ended
   end
@@ -1062,10 +1084,6 @@ local function consume_stream_chunk(state, chunk, end_marker)
     end
   end
 
-  if output_chunk ~= "" then
-    state.output[#state.output + 1] = output_chunk
-  end
-
   local text = state.pending .. output_chunk
   state.pending = ""
   local start = 1
@@ -1088,7 +1106,9 @@ end
 
 ---@class neotest-nix.GenericStreamState
 ---@field current_message string?
+---@field current_short string?
 ---@field vm_line integer?
+---@field vm_lines string[]?
 
 ---@param line string
 ---@param state neotest-nix.GenericStreamState
@@ -1098,43 +1118,45 @@ end
 ---@param positions neotest.Position[]
 ---@param target neotest-nix.Position?
 ---@param root string
----@param output string[]
-local function parse_stream_line(
-  line,
-  state,
-  stream_results,
-  tree,
-  spec,
-  positions,
-  target,
-  root,
-  output
-)
+local function parse_stream_line(line, state, stream_results, tree, spec, positions, target, root)
   local clean_line = strip_ansi(line)
   local parsed_message = parse_error_line(clean_line)
   if parsed_message ~= nil then
     state.current_message = parsed_message
+    state.current_short = clean_line
   end
 
   local path, row, column = clean_line:match("^%s*at%s+(.+):(%d+):(%d+):")
   if path ~= nil then
     local translated = local_error_path(path, root)
     if translated ~= nil then
+      local short = state.current_short ~= nil and (state.current_short .. "\n" .. clean_line)
+        or clean_line
       local parsed = {
-        message = state.current_message or failure_message(table.concat(output)),
+        message = state.current_message or "Nix command failed",
         path = translated,
         line = tonumber(row) - 1,
         column = tonumber(column) - 1,
         severity = vim.diagnostic.severity.ERROR,
       }
-      add_error(stream_results, result_id_for_error(tree, spec, parsed, positions), parsed)
+      local result_id = result_id_for_error(tree, spec, parsed, positions)
+      add_error(stream_results, result_id, parsed)
+      stream_results[result_id].short = short
     end
   end
 
+  local traceback_started = clean_line:match("^%s*Traceback%s+%(") ~= nil
+  if traceback_started then
+    state.vm_lines = { clean_line }
+  end
   local traceback_line = clean_line:match('^%s*File%s+"[^"]+",%s+line%s+(%d+),')
   if traceback_line ~= nil then
     state.vm_line = tonumber(traceback_line)
+    state.vm_lines = state.vm_lines or {}
+    state.vm_lines[#state.vm_lines + 1] = clean_line
   elseif state.vm_line ~= nil then
+    state.vm_lines = state.vm_lines or {}
+    state.vm_lines[#state.vm_lines + 1] = clean_line
     local message = clean_line:match("^%s*([%w_%.]+:%s*.*)$")
       or clean_line:match("^%s*([%w_%.]+)%s*$")
     if message ~= nil then
@@ -1148,10 +1170,14 @@ local function parse_stream_line(
             column = 0,
             severity = vim.diagnostic.severity.ERROR,
           })
+          stream_results[target.id].short = table.concat(state.vm_lines, "\n")
         end
       end
       state.vm_line = nil
+      state.vm_lines = nil
     end
+  elseif state.vm_lines ~= nil and not traceback_started then
+    state.vm_lines[#state.vm_lines + 1] = clean_line
   end
 end
 
@@ -1167,7 +1193,7 @@ function M.stream(spec, tree)
     end
 
     ---@type neotest-nix.StreamInputState
-    local input = { pending = "", marker_pending = "", output = {}, finished = false }
+    local input = { pending = "", marker_pending = "", finished = false }
     local positions = test_positions(tree)
     local target = vm_target(tree, spec)
     local is_nix_unit = spec.context ~= nil and spec.context.runner == "nix-unit"
@@ -1196,8 +1222,12 @@ function M.stream(spec, tree)
             lines[#lines + 1] = input.pending
             input.pending = ""
           end
-          if #lines > 0 and is_nix_unit then
-            local stream_results = parse_nix_unit_stream_lines(lines, positions, nix_unit)
+          if is_nix_unit then
+            local stream_results = {}
+            if #lines > 0 then
+              stream_results = parse_nix_unit_stream_lines(lines, positions, nix_unit)
+            end
+            finish_nix_unit_stream_entry(nix_unit, stream_results)
             input.finished = true
             if not vim.tbl_isempty(stream_results) then
               return paths.translate_result_paths(stream_results, root)
@@ -1205,23 +1235,10 @@ function M.stream(spec, tree)
           elseif #lines > 0 then
             local stream_results = {}
             for _, line in ipairs(lines) do
-              parse_stream_line(
-                line,
-                generic,
-                stream_results,
-                tree,
-                spec,
-                positions,
-                target,
-                root,
-                input.output
-              )
+              parse_stream_line(line, generic, stream_results, tree, spec, positions, target, root)
             end
             input.finished = true
             if not vim.tbl_isempty(stream_results) then
-              for _, result in pairs(stream_results) do
-                result.short = table.concat(input.output)
-              end
               return paths.translate_result_paths(stream_results, root)
             end
           end
@@ -1233,6 +1250,7 @@ function M.stream(spec, tree)
         if is_nix_unit then
           local stream_results = parse_nix_unit_stream_lines(lines, positions, nix_unit)
           if ended then
+            finish_nix_unit_stream_entry(nix_unit, stream_results)
             input.finished = true
           end
           if not vim.tbl_isempty(stream_results) then
@@ -1241,25 +1259,12 @@ function M.stream(spec, tree)
         else
           local stream_results = {}
           for _, line in ipairs(lines) do
-            parse_stream_line(
-              line,
-              generic,
-              stream_results,
-              tree,
-              spec,
-              positions,
-              target,
-              root,
-              input.output
-            )
+            parse_stream_line(line, generic, stream_results, tree, spec, positions, target, root)
           end
           if ended then
             input.finished = true
           end
           if not vim.tbl_isempty(stream_results) then
-            for _, result in pairs(stream_results) do
-              result.short = table.concat(input.output)
-            end
             return paths.translate_result_paths(stream_results, root)
           end
         end

@@ -800,7 +800,7 @@ describe("results", function()
     assert.are.equal("failed", parsed.unit.status)
     assert.are.equal("assertion failed", parsed.unit.errors[1].message)
     assert.are.equal(
-      ("error: assertion failed\n       at %s/checks/unit.nix:2:3:\n"):format(root),
+      ("error: assertion failed\n       at %s/checks/unit.nix:2:3:"):format(root),
       parsed.unit.short
     )
     assert.is_nil(stream())
@@ -910,6 +910,29 @@ describe("results", function()
     local second_result = assert(second.second)
     assert.are.equal("first failed", first_result.errors[1].message)
     assert.are.equal("second failed", second_result.errors[1].message)
+    assert.is_nil(stream())
+  end)
+
+  it("keeps generic partial output local to each diagnostic", function()
+    local root = project()
+    local position_tree = tree(root)
+    local prefix = string.rep("trace: unrelated output\n", 200)
+    local chunks = {
+      prefix .. "error: assertion failed\n",
+      "       at /nix/store/abc123-source/checks/unit.nix:2:3:\n",
+    }
+    local index = 0
+    local stream = results.stream(run_spec(root), position_tree)(function()
+      index = index + 1
+      return chunks[index]
+    end)
+
+    local parsed = assert(stream())
+    assert.are.equal(
+      ("error: assertion failed\n       at %s/checks/unit.nix:2:3:"):format(root),
+      parsed.unit.short
+    )
+    assert.is_nil(parsed.unit.short:find("unrelated output", 1, true))
     assert.is_nil(stream())
   end)
 
@@ -1366,6 +1389,29 @@ describe("nix-unit results", function()
       error("missing updated streamed testFail result")
     end
     assert.are.equal("{ x = 1; } != { y = 1; }", third.testFail.short)
+  end)
+
+  it("publishes a nix-unit detail block once when the entry closes", function()
+    local root = project()
+    local position_tree = unit_tree(root)
+    local chunks = {
+      "\226\157\140 testFail\n",
+      "first detail\n",
+      "second detail\n",
+      "\240\159\152\162 0/1 successful\n",
+    }
+    local index = 0
+    local stream = results.stream(run_spec(root, { runner = "nix-unit" }), position_tree)(function()
+      index = index + 1
+      return chunks[index]
+    end)
+
+    local marker = assert(stream())
+    assert.are.equal("failed", marker.testFail.status)
+    local details = assert(stream())
+    assert.are.equal("first detail\nsecond detail", details.testFail.short)
+    assert.are.equal(4, index)
+    assert.is_nil(stream())
   end)
 
   it(

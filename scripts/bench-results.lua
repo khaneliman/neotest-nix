@@ -79,6 +79,44 @@ for _, size in ipairs(sizes) do
   )
 end
 
+local dense_sizes = { 500, 1000, 2000 }
+for _, count in ipairs(dense_sizes) do
+  local index = 0
+  local stream = results.stream({ command = { "true" }, cwd = root, context = {} }, tree)(function()
+    index = index + 1
+    if index > count then
+      return nil
+    end
+    return {
+      ("error: failure %d"):format(index),
+      ("       at %s:2:3:"):format(source),
+    }
+  end)
+
+  local started = uv.hrtime()
+  local updates = 0
+  local parsed
+  while true do
+    local update = stream()
+    if update == nil then
+      break
+    end
+    parsed = update.unit
+    updates = updates + 1
+  end
+  local elapsed_ms = (uv.hrtime() - started) / 1e6
+  assert(parsed and parsed.errors)
+  assert(parsed.errors[1].message == ("failure %d"):format(count))
+  assert(updates == count)
+  io.write(
+    ("mode=generic-dense diagnostics=%d updates=%d elapsed_ms=%.3f\n"):format(
+      count,
+      updates,
+      elapsed_ms
+    )
+  )
+end
+
 for _, size in ipairs(sizes) do
   local marker = "\226\156\133 systems.x86_64-linux.unit\n"
   local output = string.rep(marker, math.ceil(size / #marker)):sub(1, size - 1) .. "\n"
@@ -110,6 +148,49 @@ for _, size in ipairs(sizes) do
   assert(parsed and parsed.status == "passed")
   io.write(
     ("mode=nix-unit bytes=%d chunks=%d elapsed_ms=%.3f\n"):format(#output, chunks, elapsed_ms)
+  )
+end
+
+for _, count in ipairs(dense_sizes) do
+  local index = 0
+  local stream = results.stream(
+    { command = { "true" }, cwd = root, context = { runner = "nix-unit" } },
+    tree
+  )(function()
+    index = index + 1
+    if index == 1 then
+      return "\226\157\140 unit\n"
+    end
+    if index <= count + 1 then
+      return ("detail %d\n"):format(index - 1)
+    end
+    if index == count + 2 then
+      return "\240\159\152\162 0/1 successful\n"
+    end
+    return nil
+  end)
+
+  local started = uv.hrtime()
+  local updates = 0
+  local parsed
+  while true do
+    local update = stream()
+    if update == nil then
+      break
+    end
+    parsed = update.unit
+    updates = updates + 1
+  end
+  local elapsed_ms = (uv.hrtime() - started) / 1e6
+  assert(parsed and parsed.status == "failed")
+  assert(parsed.short:find(("detail %d"):format(count), 1, true))
+  assert(updates == 2)
+  io.write(
+    ("mode=nix-unit-detail lines=%d updates=%d elapsed_ms=%.3f\n"):format(
+      count,
+      updates,
+      elapsed_ms
+    )
   )
 end
 
