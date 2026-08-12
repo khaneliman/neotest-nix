@@ -179,6 +179,10 @@ require("neotest-nix")({
   -- evaluate the package lazily to enumerate individual test attrs.
   discover_nixpkgs_eval_tests = false,
 
+  -- Build and launch driverInteractive for a single NixOS VM test. Use an
+  -- integrated Neotest strategy so the interactive driver has a terminal.
+  vm_interactive = false,
+
   -- Enable first-class roots for recognized non-flake files. Set false to
   -- restore flake-only behavior outside Nixpkgs.
   non_flake_roots = true,
@@ -201,6 +205,7 @@ require("neotest-nix")({
 | `nix_unit_flakes` | `neotest-nix.NixUnitFlake[]?` | `nil` | Map wrapped nix-unit files to a flake installable, overriding auto-detection. |
 | `nixpkgs_mode` | `boolean?` | `nil` | Auto-detect, force, or disable Nixpkgs-style legacy discovery. |
 | `discover_nixpkgs_eval_tests` | `boolean?` | `false` | Lazily evaluate computed by-name `passthru.tests` when static parsing finds none. |
+| `vm_interactive` | `boolean?` | `false` | Launch `driverInteractive` for a single NixOS VM test. |
 | `non_flake_roots` | `boolean?` | `true` | Enable recognized non-flake roots; set false for flake-only behavior. |
 | `nix_bin` | `string?` | `"nix"` | Executable for nix CLI invocations. |
 | `nix_unit_bin` | `string?` | `"nix-unit"` | Executable for nix-unit invocations. |
@@ -208,6 +213,20 @@ require("neotest-nix")({
 | `nix_extra_args` | `string[]?` | `nil` | Extra args for nix-family commands. |
 | `nix_unit_extra_args` | `string[]?` | `nil` | Extra args for nix-unit commands. |
 | `namaka_extra_args` | `string[]?` | `nil` | Extra global args before Namaka's command. |
+
+When `vm_interactive` is enabled, run one discovered VM test with Neotest's
+integrated strategy:
+
+```lua
+require("neotest").run.run({ strategy = "integrated" })
+```
+
+The option applies only to single flake checks or Nixpkgs `nixosTests` positions
+whose `testScript` was discovered. The default streaming strategy is headless.
+The adapter builds before launching the driver, so a build failure prevents the
+interactive session. Arguments passed to `run.run` do not reach that build.
+Multi-output VM derivations are unsupported because the launcher requires one
+output path.
 
 ## How discovery works
 
