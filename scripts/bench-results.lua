@@ -43,7 +43,7 @@ vim.fn.mkdir(vim.fs.joinpath(root, "checks"), "p")
 local source = vim.fs.joinpath(root, "checks", "unit.nix")
 vim.fn.writefile({ "first", "second" }, source)
 local tree = Tree:new({ id = root, path = root, type = "file" }, {
-  Tree:new({ id = "unit", path = source, range = { 0, 0, 1, 0 }, type = "test" }),
+  Tree:new({ id = "unit", name = "unit", path = source, range = { 0, 0, 1, 0 }, type = "test" }),
 })
 
 local sizes = { 1024, 64 * 1024, 1024 * 1024 }
@@ -63,12 +63,54 @@ for _, size in ipairs(sizes) do
   end)
 
   local started = uv.hrtime()
-  local parsed = stream()
+  local parsed
+  while true do
+    local update = stream()
+    if update == nil then
+      break
+    end
+    parsed = update.unit or parsed
+  end
   local elapsed_ms = (uv.hrtime() - started) / 1e6
-  assert(parsed and parsed.unit and parsed.unit.errors)
-  assert(parsed.unit.errors[1].message == "assertion failed")
-  assert(stream() == nil)
-  io.write(("bytes=%d chunks=%d elapsed_ms=%.3f\n"):format(#output, chunks, elapsed_ms))
+  assert(parsed and parsed.errors)
+  assert(parsed.errors[1].message == "assertion failed")
+  io.write(
+    ("mode=generic bytes=%d chunks=%d elapsed_ms=%.3f\n"):format(#output, chunks, elapsed_ms)
+  )
+end
+
+for _, size in ipairs(sizes) do
+  local marker = "\226\156\133 systems.x86_64-linux.unit\n"
+  local output = string.rep(marker, math.ceil(size / #marker)):sub(1, size - 1) .. "\n"
+  local offset = 1
+  local chunks = 0
+  local stream = results.stream(
+    { command = { "true" }, cwd = root, context = { runner = "nix-unit" } },
+    tree
+  )(function()
+    if offset > #output then
+      return nil
+    end
+    local chunk = output:sub(offset, offset + 4095)
+    offset = offset + #chunk
+    chunks = chunks + 1
+    return chunk
+  end)
+
+  local started = uv.hrtime()
+  local parsed
+  while true do
+    local update = stream()
+    if update == nil then
+      break
+    end
+    parsed = update.unit or parsed
+  end
+  local elapsed_ms = (uv.hrtime() - started) / 1e6
+  assert(parsed and parsed.status == "passed")
+  io.write(
+    ("mode=nix-unit bytes=%d chunks=%d elapsed_ms=%.3f\n"):format(#output, chunks, elapsed_ms)
+  )
 end
 
 vim.fn.delete(root, "rf")

@@ -945,40 +945,69 @@ function M.results(spec, result, tree)
   return paths.translate_result_paths(results, root)
 end
 
----Incrementally parse nix-unit's per-attribute output as it streams in,
----returning only positions whose result changed since the last call. Only
----complete lines (those already terminated by a newline) are handed to
----`M.parse_nix_unit`: a marker or detail line still arriving byte-by-byte
----must never be matched to a position before it has fully arrived (e.g. a
----truncated name that happens to collide with a *different*, shorter
----attribute name). A multi-line diff block is unaffected by this since it
----keeps accumulating into the same attribute's entry, exactly like the final
----(whole-output) parse already does; nothing here needs to guess where a
----detail block ends. Whatever is reported here is always superseded by the
----authoritative parse in `nix_unit_results` once the run finishes, so a
----mis-resolved or still-partial message never survives past the final result.
----@param text string
+---@class neotest-nix.NixUnitStreamEntry
+---@field name string
+---@field status "passed"|"failed"
+---@field lines string[]
+---@field position_id string?
+---@field owns_result boolean
+
+---@class neotest-nix.NixUnitStreamState
+---@field current neotest-nix.NixUnitStreamEntry?
+---@field results table<string, neotest.Result>
+
+---@param entry neotest-nix.NixUnitStreamEntry
+---@return neotest.Result
+local function nix_unit_stream_result(entry)
+  local message = vim.trim(table.concat(entry.lines, "\n"))
+  if entry.status == "passed" then
+    return { status = "passed", short = message }
+  end
+  return {
+    status = "failed",
+    short = message,
+    errors = { { message = message ~= "" and message or (entry.name .. " failed") } },
+  }
+end
+
+---Process complete nix-unit lines once and return only changed positions.
+---The final whole-output parser remains authoritative after process exit.
+---@param lines string[]
 ---@param positions neotest.Position[]
----@param streamed table<string, { status: string, short: string? }>
+---@param state neotest-nix.NixUnitStreamState
 ---@return table<string, neotest.Result>
-local function nix_unit_stream_results(text, positions, streamed)
-  local complete = text:match("^(.*\n)")
-  if complete == nil then
-    return {}
-  end
-
-  local entries = M.parse_nix_unit(complete)
-  local entry_results = nix_unit_entry_results(entries, positions)
-
+local function parse_nix_unit_stream_lines(lines, positions, state)
   local changed = {}
-  for id, result in pairs(entry_results) do
-    local previous = streamed[id]
-    if previous == nil or previous.status ~= result.status or previous.short ~= result.short then
-      changed[id] = result
+  for _, raw_line in ipairs(lines) do
+    local line = strip_ansi(raw_line)
+    local status, name = nix_unit_marker(line)
+    if status ~= nil and name ~= nil then
+      local position = match_nix_unit_position(positions, name)
+      local position_id = position ~= nil and position.id or nil
+      local existing = position_id ~= nil and state.results[position_id] or nil
+      state.current = {
+        name = name,
+        status = status,
+        lines = {},
+        position_id = position_id,
+        owns_result = position_id ~= nil and (status == "failed" or existing == nil),
+      }
+    elseif nix_unit_summary(line) then
+      state.current = nil
+    elseif state.current ~= nil then
+      state.current.lines[#state.current.lines + 1] = line
     end
-    streamed[id] = { status = result.status, short = result.short }
-  end
 
+    local current = state.current
+    if current ~= nil and current.position_id ~= nil and current.owns_result then
+      local result = nix_unit_stream_result(current)
+      local previous = state.results[current.position_id]
+      if previous == nil or previous.status ~= result.status or previous.short ~= result.short then
+        state.results[current.position_id] = result
+        changed[current.position_id] = result
+      end
+    end
+  end
   return changed
 end
 
@@ -1146,8 +1175,8 @@ function M.stream(spec, tree)
     local root = spec.cwd or uv.cwd() or "."
     ---@type neotest-nix.GenericStreamState
     local generic = {}
-    ---@type table<string, { status: string, short: string? }>
-    local streamed_nix_unit = {}
+    ---@type neotest-nix.NixUnitStreamState
+    local nix_unit = { results = {} }
 
     return function()
       if input.finished then
@@ -1163,11 +1192,17 @@ function M.stream(spec, tree)
             input.marker_pending = ""
             lines = consume_stream_chunk(input, trailing, nil)
           end
-          if input.pending ~= "" and not is_nix_unit then
+          if input.pending ~= "" then
             lines[#lines + 1] = input.pending
             input.pending = ""
           end
-          if #lines > 0 and not is_nix_unit then
+          if #lines > 0 and is_nix_unit then
+            local stream_results = parse_nix_unit_stream_lines(lines, positions, nix_unit)
+            input.finished = true
+            if not vim.tbl_isempty(stream_results) then
+              return paths.translate_result_paths(stream_results, root)
+            end
+          elseif #lines > 0 then
             local stream_results = {}
             for _, line in ipairs(lines) do
               parse_stream_line(
@@ -1196,8 +1231,7 @@ function M.stream(spec, tree)
 
         local lines, ended = consume_stream_chunk(input, chunk, end_marker)
         if is_nix_unit then
-          local full_output = table.concat(input.output)
-          local stream_results = nix_unit_stream_results(full_output, positions, streamed_nix_unit)
+          local stream_results = parse_nix_unit_stream_lines(lines, positions, nix_unit)
           if ended then
             input.finished = true
           end

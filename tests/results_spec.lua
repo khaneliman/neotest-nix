@@ -1462,6 +1462,95 @@ describe("nix-unit results", function()
     end
   )
 
+  it("streams nix-unit markers and details across byte-sized chunks", function()
+    local root = project()
+    local position_tree = unit_tree(root)
+    local output = table.concat({
+      "\226\156\133 testPass",
+      "\226\157\140 testFail",
+      "{ x = 1; } != { y = 1; }",
+      "\240\159\152\162 1/2 successful",
+    }, "\n")
+    local index = 0
+    local stream = results.stream(run_spec(root, { runner = "nix-unit" }), position_tree)(function()
+      index = index + 1
+      return index <= #output and output:sub(index, index) or nil
+    end)
+    local seen = {}
+    while true do
+      local parsed = stream()
+      if parsed == nil then
+        break
+      end
+      for id, result in pairs(parsed) do
+        seen[id] = result
+      end
+    end
+
+    assert.are.equal("passed", seen.testPass.status)
+    assert.are.equal("failed", seen.testFail.status)
+    assert.are.equal("{ x = 1; } != { y = 1; }", seen.testFail.short)
+  end)
+
+  it("keeps a streamed failure when a later system passes the same leaf", function()
+    local root = project()
+    local position_tree = unit_tree(root)
+    local chunks = {
+      "\226\157\140 systems.a.testFail\n",
+      "system a failed\n",
+      "\226\156\133 systems.b.testFail\n",
+      "\240\159\152\162 1/2 successful\n",
+    }
+    local index = 0
+    local stream = results.stream(run_spec(root, { runner = "nix-unit" }), position_tree)(function()
+      index = index + 1
+      return chunks[index]
+    end)
+    local seen
+    while true do
+      local parsed = stream()
+      if parsed == nil then
+        break
+      end
+      if parsed.testFail ~= nil then
+        seen = parsed.testFail
+      end
+    end
+
+    assert.are.equal("failed", seen.status)
+    assert.are.equal("system a failed", seen.short)
+  end)
+
+  it("flushes final unterminated nix-unit markers and details", function()
+    local root = project()
+    local position_tree = unit_tree(root)
+
+    local marker_chunks = { "\226\157\140 testFail" }
+    local marker_index = 0
+    local marker_stream = results.stream(run_spec(root, { runner = "nix-unit" }), position_tree)(
+      function()
+        marker_index = marker_index + 1
+        return marker_chunks[marker_index]
+      end
+    )
+    local marker_result = assert(marker_stream())
+    assert.are.equal("failed", marker_result.testFail.status)
+    assert.is_nil(marker_stream())
+
+    local detail_chunks = { "\226\157\140 testFail\n", "final detail" }
+    local detail_index = 0
+    local detail_stream = results.stream(run_spec(root, { runner = "nix-unit" }), position_tree)(
+      function()
+        detail_index = detail_index + 1
+        return detail_chunks[detail_index]
+      end
+    )
+    assert.are.equal("failed", assert(detail_stream()).testFail.status)
+    local detail_result = assert(detail_stream())
+    assert.are.equal("final detail", detail_result.testFail.short)
+    assert.is_nil(detail_stream())
+  end)
+
   it("lets the final parse override anything reported by the streaming partial", function()
     local root = project()
     local position_tree = unit_tree(root)
