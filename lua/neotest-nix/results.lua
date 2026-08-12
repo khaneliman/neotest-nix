@@ -357,7 +357,9 @@ local function add_vm_tracebacks(results, target, output, start_at)
 
   for index = start_at, #tracebacks do
     local traceback = tracebacks[index]
-    local line = vm.test_script_line(target, traceback.line)
+    local line = vm.is_test_script_filename(traceback.filename)
+        and vm.test_script_line(target, traceback.line)
+      or nil
     if line ~= nil then
       add_error(results, target.id, {
         message = traceback.message,
@@ -1107,6 +1109,7 @@ end
 ---@class neotest-nix.GenericStreamState
 ---@field current_message string?
 ---@field current_short string?
+---@field vm_filename string?
 ---@field vm_line integer?
 ---@field vm_lines string[]?
 
@@ -1149,18 +1152,21 @@ local function parse_stream_line(line, state, stream_results, tree, spec, positi
   if traceback_started then
     state.vm_lines = { clean_line }
   end
-  local traceback_line = clean_line:match('^%s*File%s+"[^"]+",%s+line%s+(%d+),')
+  local traceback_filename, traceback_line =
+    clean_line:match('^%s*File%s+"([^"]+)",%s+line%s+(%d+),')
   if traceback_line ~= nil then
-    state.vm_line = tonumber(traceback_line)
     state.vm_lines = state.vm_lines or {}
     state.vm_lines[#state.vm_lines + 1] = clean_line
-  elseif state.vm_line ~= nil then
-    state.vm_lines = state.vm_lines or {}
+    if vm.is_test_script_filename(traceback_filename) then
+      state.vm_filename = traceback_filename
+      state.vm_line = tonumber(traceback_line)
+    end
+  elseif state.vm_lines ~= nil and not traceback_started then
     state.vm_lines[#state.vm_lines + 1] = clean_line
     local message = clean_line:match("^%s*([%w_%.]+:%s*.*)$")
       or clean_line:match("^%s*([%w_%.]+)%s*$")
     if message ~= nil then
-      if target ~= nil then
+      if target ~= nil and state.vm_line ~= nil then
         local mapped_line = vm.test_script_line(target, state.vm_line)
         if mapped_line ~= nil then
           add_error(stream_results, target.id, {
@@ -1173,11 +1179,10 @@ local function parse_stream_line(line, state, stream_results, tree, spec, positi
           stream_results[target.id].short = table.concat(state.vm_lines, "\n")
         end
       end
+      state.vm_filename = nil
       state.vm_line = nil
       state.vm_lines = nil
     end
-  elseif state.vm_lines ~= nil and not traceback_started then
-    state.vm_lines[#state.vm_lines + 1] = clean_line
   end
 end
 

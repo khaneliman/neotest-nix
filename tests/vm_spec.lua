@@ -23,6 +23,7 @@ describe("vm", function()
 
     assert.are.same({
       {
+        filename = "/nix/store/hash-source/test-script.py",
         line = 3,
         message = "AssertionError: command failed",
       },
@@ -39,14 +40,42 @@ describe("vm", function()
 
     assert.are.same({
       {
+        filename = "/nix/store/hash-source/test-script.py",
         line = 4,
         message = "KeyError",
       },
     }, tracebacks)
   end)
 
+  it("preserves a test script frame before later Python frames", function()
+    local tracebacks = vm.parse_python_tracebacks(table.concat({
+      '  File "/nix/store/hash-source/test-script.py", line 3, in <module>',
+      '  File "/nix/store/hash-source/driver.py", line 80, in run',
+      "AssertionError: command failed",
+    }, "\n"))
+
+    assert.are.same({
+      {
+        filename = "/nix/store/hash-source/test-script.py",
+        line = 3,
+        message = "AssertionError: command failed",
+      },
+    }, tracebacks)
+  end)
+
+  it("recognizes test-script.py by basename", function()
+    assert.is_true(vm.is_test_script_filename("/nix/store/hash-source/test-script.py"))
+    assert.is_true(vm.is_test_script_filename("test-script.py"))
+    assert.is_false(vm.is_test_script_filename("/nix/store/hash-source/other.py"))
+    assert.is_false(vm.is_test_script_filename("/nix/store/hash-source/test-script.pyc"))
+  end)
+
   it("maps Python traceback lines into testScript ranges", function()
-    assert.are.equal(12, vm.test_script_line(position({ 9, 17, 13, 6 }), 3))
+    assert.are.equal(13, vm.test_script_line(position({ 9, 17, 13, 6 }), 4))
+  end)
+
+  it("rejects Python traceback lines outside testScript ranges", function()
+    assert.is_nil(vm.test_script_line(position({ 9, 17, 13, 6 }), 5))
   end)
 
   it("ignores invalid traceback lines without testScript metadata", function()

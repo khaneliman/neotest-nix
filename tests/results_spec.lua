@@ -704,6 +704,55 @@ describe("results", function()
     }, parsed.vm.errors[1])
   end)
 
+  it("ignores VM traceback frames from other Python files", function()
+    local root = project()
+    local position_tree = vm_tree(root)
+    local parsed = results.results(run_spec(root), {
+      code = 1,
+      output = output_file({
+        "Traceback (most recent call last):",
+        '  File "/nix/store/hash-source/helper.py", line 2, in <module>',
+        "AssertionError: unrelated frame",
+      }),
+    }, position_tree)
+
+    assert.is_nil(parsed.vm)
+    assert.are.equal("failed", parsed[position_tree:data().id].status)
+  end)
+
+  it("ignores VM traceback lines outside the testScript range", function()
+    local root = project()
+    local position_tree = vm_tree(root)
+    local parsed = results.results(run_spec(root), {
+      code = 1,
+      output = output_file({
+        "Traceback (most recent call last):",
+        '  File "/nix/store/hash-source/test-script.py", line 99, in <module>',
+        "AssertionError: generated wrapper failure",
+      }),
+    }, position_tree)
+
+    assert.is_nil(parsed.vm)
+    assert.are.equal("failed", parsed[position_tree:data().id].status)
+  end)
+
+  it("maps a VM test script frame before later Python frames", function()
+    local root = project()
+    local position_tree = vm_tree(root)
+    local parsed = results.results(run_spec(root), {
+      code = 1,
+      output = output_file({
+        "Traceback (most recent call last):",
+        '  File "/nix/store/hash-source/test-script.py", line 2, in <module>',
+        '  File "/nix/store/hash-source/driver.py", line 80, in run',
+        "AssertionError: command failed",
+      }),
+    }, position_tree)
+
+    assert.are.equal(6, parsed.vm.errors[1].line)
+    assert.are.equal("AssertionError: command failed", parsed.vm.errors[1].message)
+  end)
+
   it("attributes a VM traceback only to the targeted test", function()
     local root = project()
     local position_tree = multi_vm_tree(root)
@@ -852,6 +901,51 @@ describe("results", function()
       column = 0,
       severity = vim.diagnostic.severity.ERROR,
     }, vm_result.errors[1])
+    assert.is_nil(stream())
+  end)
+
+  it("does not stream unrelated or out-of-range VM frames", function()
+    local root = project()
+    local position_tree = vm_tree(root)
+    local chunks = {
+      table.concat({
+        "Traceback (most recent call last):",
+        '  File "/nix/store/hash-source/helper.py", line 2, in <module>',
+        "AssertionError: unrelated frame",
+      }, "\n"),
+      table.concat({
+        "Traceback (most recent call last):",
+        '  File "/nix/store/hash-source/test-script.py", line 99, in <module>',
+        "AssertionError: generated wrapper failure",
+      }, "\n"),
+    }
+    local index = 0
+    local stream = results.stream(run_spec(root), position_tree)(function()
+      index = index + 1
+      return chunks[index]
+    end)
+
+    assert.is_nil(stream())
+  end)
+
+  it("streams a VM test script frame before later Python frames", function()
+    local root = project()
+    local position_tree = vm_tree(root)
+    local lines = {
+      "Traceback (most recent call last):",
+      '  File "/nix/store/hash-source/test-script.py", line 2, in <module>',
+      '  File "/nix/store/hash-source/driver.py", line 80, in run',
+      "AssertionError: command failed",
+    }
+    local index = 0
+    local stream = results.stream(run_spec(root), position_tree)(function()
+      index = index + 1
+      return index == 1 and table.concat(lines, "\n") or nil
+    end)
+
+    local parsed = assert(stream())
+    assert.are.equal(6, parsed.vm.errors[1].line)
+    assert.are.equal("AssertionError: command failed", parsed.vm.errors[1].message)
     assert.is_nil(stream())
   end)
 
