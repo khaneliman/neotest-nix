@@ -58,7 +58,9 @@ describe("follows fixture integration (real nix build, real nixpkgs.follows)", f
 
     local node
     for _, candidate in tree:iter_nodes() do
-      if candidate:data().attr_path == "checks.x86_64-linux.unit" then
+      local position = candidate:data()
+      ---@cast position neotest-nix.Position
+      if position.attr_path == "checks.x86_64-linux.unit" then
         node = candidate
       end
     end

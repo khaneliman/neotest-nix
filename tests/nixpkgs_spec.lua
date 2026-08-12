@@ -1,6 +1,17 @@
 ---@diagnostic disable: need-check-nil, missing-fields
 local nixpkgs = require("neotest-nix.nixpkgs")
 
+---@param tree neotest.Tree?
+---@return neotest-nix.Position
+local function position_data(tree)
+  if tree == nil then
+    error("expected discovered tree")
+  end
+  local position = tree:data()
+  ---@cast position neotest-nix.Position
+  return position
+end
+
 local function mkdir(path)
   vim.fn.mkdir(path, "p")
 end
@@ -163,7 +174,7 @@ describe("nixpkgs", function()
 
       local tree = nixpkgs.discover_positions(pkg, root, {})
       assert.is_not_nil(tree)
-      assert.are.equal("hello.tests", tree:data().nixpkgs_attr)
+      assert.are.equal("hello.tests", position_data(tree).nixpkgs_attr)
 
       local attrs = test_attrs(tree)
       assert.are.equal("hello.tests.simple", attrs.simple)
@@ -439,7 +450,7 @@ describe("nixpkgs", function()
 
       local tree = nixpkgs.discover_positions(pkg, root, {})
       assert.is_not_nil(tree)
-      assert.are.equal("plain.tests", tree:data().nixpkgs_attr)
+      assert.are.equal("plain.tests", position_data(tree).nixpkgs_attr)
       assert.are.same({}, test_attrs(tree))
     end)
   end)
@@ -487,20 +498,20 @@ describe("nixpkgs", function()
       write_file(systems, { "[ ]" })
 
       local rtree = nixpkgs.discover_positions(release, root, {})
-      assert.are.equal("lib/tests/release.nix", rtree:data().nixpkgs_file_build)
-      assert.are.equal("nix", rtree:data().runner)
+      assert.are.equal("lib/tests/release.nix", position_data(rtree).nixpkgs_file_build)
+      assert.are.equal("nix", position_data(rtree).runner)
 
       local maintree = nixpkgs.discover_positions(maintainers, root, {})
-      assert.are.equal("lib/tests/maintainers.nix", maintree:data().nixpkgs_file_build)
-      assert.are.equal("nix", maintree:data().runner)
+      assert.are.equal("lib/tests/maintainers.nix", position_data(maintree).nixpkgs_file_build)
+      assert.are.equal("nix", position_data(maintree).runner)
 
       local mtree = nixpkgs.discover_positions(misc, root, {})
-      assert.are.equal("lib/tests/misc.nix", mtree:data().nixpkgs_file_eval)
-      assert.are.equal("nix-eval", mtree:data().runner)
+      assert.are.equal("lib/tests/misc.nix", position_data(mtree).nixpkgs_file_eval)
+      assert.are.equal("nix-eval", position_data(mtree).runner)
 
       local stree = nixpkgs.discover_positions(systems, root, {})
-      assert.are.equal("lib/tests/systems.nix", stree:data().nixpkgs_file_eval)
-      assert.are.equal("nix-eval", stree:data().runner)
+      assert.are.equal("lib/tests/systems.nix", position_data(stree).nixpkgs_file_eval)
+      assert.are.equal("nix-eval", position_data(stree).runner)
     end)
 
     it("enumerates static lib.runTests members under eval-style files", function()
@@ -555,10 +566,10 @@ describe("nixpkgs", function()
       })
 
       local tree = nixpkgs.discover_positions(test, root, {})
-      assert.are.equal("nixosTests.login", tree:data().nixpkgs_attr)
-      assert.are.equal("nix", tree:data().runner)
+      assert.are.equal("nixosTests.login", position_data(tree).nixpkgs_attr)
+      assert.are.equal("nix", position_data(tree).runner)
       -- testScript range captured for traceback attribution
-      assert.is_not_nil(tree:data().test_script_range)
+      assert.is_not_nil(position_data(tree).test_script_range)
     end)
   end)
 

@@ -41,9 +41,6 @@
           "duplicate-set-field"
           "undefined-doc-class"
           "undefined-doc-name"
-          # luassert's assert.* fields are built dynamically; EmmyLua has no
-          # type defs for them, so disable the field check rather than annotate.
-          "undefined-field"
         ];
       };
       # mk-luarc has no `globals` knob, so merge busted's test globals into its

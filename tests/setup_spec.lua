@@ -177,6 +177,7 @@ describe("config validation", function()
 
   it("accepts a fully specified config", function()
     local adapter = require("neotest-nix")
+    ---@diagnostic disable-next-line: undefined-field
     assert.has_no.errors(function()
       adapter.setup({
         parser_runtime_paths = { "/tmp/nix-parser" },
@@ -261,6 +262,7 @@ describe("config validation", function()
   it("accepts valid Lua eval_outputs match patterns", function()
     local adapter = require("neotest-nix")
     for _, pattern in ipairs(valid_patterns) do
+      ---@diagnostic disable-next-line: undefined-field
       assert.has_no.errors(function()
         adapter.setup({
           eval_outputs = { { attr = "checks", match = pattern } },

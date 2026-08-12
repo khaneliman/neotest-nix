@@ -24,11 +24,13 @@ local results = require("neotest-nix.results")
 local spec = require("neotest-nix.spec")
 
 ---@param tree neotest.Tree
----@param predicate fun(position: neotest.Position): boolean
+---@param predicate fun(position: neotest-nix.Position): boolean
 ---@return neotest.Tree?
 local function find_node(tree, predicate)
   for _, node in tree:iter_nodes() do
-    if predicate(node:data()) then
+    local position = node:data()
+    ---@cast position neotest-nix.Position
+    if predicate(position) then
       return node
     end
   end
