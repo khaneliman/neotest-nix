@@ -1,5 +1,35 @@
 local results = require("neotest-nix.results")
 
+local active_store_root
+local original_fs_lstat
+local original_io_open
+
+local function store_local_path(path)
+  local relative = path:match("^/nix/store/[^/]+/(.+)$")
+  if relative == nil or active_store_root == nil then
+    return nil
+  end
+  return vim.fs.joinpath(active_store_root, relative)
+end
+
+local function install_store_redirect()
+  active_store_root = nil
+  original_fs_lstat = vim.uv.fs_lstat
+  original_io_open = rawget(io, "open")
+  vim.uv.fs_lstat = function(path)
+    return original_fs_lstat(store_local_path(path) or path)
+  end
+  rawset(io, "open", function(path, mode)
+    return original_io_open(store_local_path(path) or path, mode)
+  end)
+end
+
+local function restore_store_redirect()
+  vim.uv.fs_lstat = original_fs_lstat
+  rawset(io, "open", original_io_open)
+  active_store_root = nil
+end
+
 local Tree = {}
 Tree.__index = Tree
 
@@ -59,6 +89,7 @@ end
 
 local function project()
   local root = vim.fn.tempname()
+  active_store_root = root
   vim.fn.mkdir(vim.fs.joinpath(root, "checks"), "p")
   vim.fn.writefile(
     { "first", "second", "third", "fourth" },
@@ -175,6 +206,9 @@ local function run_spec(root, context)
 end
 
 describe("results", function()
+  before_each(install_store_redirect)
+  after_each(restore_store_redirect)
+
   it("marks successful runs as passed", function()
     local root = project()
     local position_tree = tree(root)
@@ -821,6 +855,9 @@ describe("results", function()
 end)
 
 describe("nix-unit results", function()
+  before_each(install_store_redirect)
+  after_each(restore_store_redirect)
+
   local function unit_tree(root)
     local file_path = vim.fs.joinpath(root, "lib", "tests", "default.nix")
     local function leaf(name)

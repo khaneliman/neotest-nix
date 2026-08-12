@@ -1,11 +1,59 @@
 local M = {}
 
 local uv = vim.uv
+local COMPARE_CHUNK_SIZE = 64 * 1024
 
----@param path string
+---@param file file*
+---@return string?
+---@return boolean ok
+local function read_chunk(file)
+  local ok, chunk, err = pcall(file.read, file, COMPARE_CHUNK_SIZE)
+  return ok and err == nil and chunk or nil, ok and err == nil
+end
+
+---@param left_path string
+---@param right_path string
 ---@return boolean
-local function exists(path)
-  return uv.fs_stat(path) ~= nil
+local function same_regular_file_contents(left_path, right_path)
+  local left_stat = uv.fs_lstat(left_path)
+  local right_stat = uv.fs_lstat(right_path)
+  if
+    left_stat == nil
+    or right_stat == nil
+    or left_stat.type ~= "file"
+    or right_stat.type ~= "file"
+    or left_stat.size ~= right_stat.size
+  then
+    return false
+  end
+
+  local left = io.open(left_path, "rb")
+  if left == nil then
+    return false
+  end
+
+  local right = io.open(right_path, "rb")
+  if right == nil then
+    left:close()
+    return false
+  end
+
+  local equal = true
+  while true do
+    local left_chunk, left_ok = read_chunk(left)
+    local right_chunk, right_ok = read_chunk(right)
+    if not left_ok or not right_ok or left_chunk ~= right_chunk then
+      equal = false
+      break
+    end
+    if left_chunk == nil then
+      break
+    end
+  end
+
+  left:close()
+  right:close()
+  return equal
 end
 
 ---@param root string
@@ -31,7 +79,7 @@ function M.translate_store_path(path, root)
   end
 
   local translated = local_path(root, relative_path)
-  if exists(translated) then
+  if same_regular_file_contents(path, translated) then
     return translated
   end
 
