@@ -982,6 +982,150 @@ local function nix_unit_stream_results(text, positions, streamed)
   return changed
 end
 
+---@class neotest-nix.StreamInputState
+---@field pending string
+---@field marker_pending string
+---@field output string[]
+---@field finished boolean
+
+---@param state neotest-nix.StreamInputState
+---@param chunk string|string[]
+---@param end_marker string?
+---@return string[] complete_lines
+---@return boolean ended
+local function consume_stream_chunk(state, chunk, end_marker)
+  local complete_lines = {}
+  if type(chunk) == "table" then
+    local output_lines = {}
+    local ended = false
+    for _, line in ipairs(chunk) do
+      if end_marker ~= nil and line == end_marker then
+        ended = true
+        break
+      end
+      output_lines[#output_lines + 1] = line
+      complete_lines[#complete_lines + 1] = line
+    end
+    if #output_lines > 0 then
+      state.output[#state.output + 1] = table.concat(output_lines, "\n") .. "\n"
+    end
+    return complete_lines, ended
+  end
+
+  local output_chunk = state.marker_pending .. chunk
+  state.marker_pending = ""
+  local ended = false
+  if end_marker ~= nil then
+    local marker_token = "\n" .. end_marker .. "\n"
+    local marker_start = output_chunk:find(marker_token, 1, true)
+    if marker_start ~= nil then
+      output_chunk = output_chunk:sub(1, marker_start - 1)
+      ended = true
+    else
+      local max_prefix = math.min(#output_chunk, #marker_token - 1)
+      for length = max_prefix, 1, -1 do
+        if output_chunk:sub(-length) == marker_token:sub(1, length) then
+          state.marker_pending = output_chunk:sub(-length)
+          output_chunk = output_chunk:sub(1, #output_chunk - length)
+          break
+        end
+      end
+    end
+  end
+
+  if output_chunk ~= "" then
+    state.output[#state.output + 1] = output_chunk
+  end
+
+  local text = state.pending .. output_chunk
+  state.pending = ""
+  local start = 1
+  while true do
+    local newline = text:find("\n", start, true)
+    if newline == nil then
+      break
+    end
+    local line = text:sub(start, newline - 1):gsub("\r$", "")
+    complete_lines[#complete_lines + 1] = line
+    start = newline + 1
+  end
+  state.pending = text:sub(start)
+  if ended and state.pending ~= "" then
+    complete_lines[#complete_lines + 1] = state.pending
+    state.pending = ""
+  end
+  return complete_lines, ended
+end
+
+---@class neotest-nix.GenericStreamState
+---@field current_message string?
+---@field vm_line integer?
+
+---@param line string
+---@param state neotest-nix.GenericStreamState
+---@param stream_results table<string, neotest.Result>
+---@param tree neotest.Tree
+---@param spec neotest.RunSpec
+---@param positions neotest.Position[]
+---@param target neotest-nix.Position?
+---@param root string
+---@param output string[]
+local function parse_stream_line(
+  line,
+  state,
+  stream_results,
+  tree,
+  spec,
+  positions,
+  target,
+  root,
+  output
+)
+  local clean_line = strip_ansi(line)
+  local parsed_message = parse_error_line(clean_line)
+  if parsed_message ~= nil then
+    state.current_message = parsed_message
+  end
+
+  local path, row, column = clean_line:match("^%s*at%s+(.+):(%d+):(%d+):")
+  if path ~= nil then
+    local translated = local_error_path(path, root)
+    if translated ~= nil then
+      local parsed = {
+        message = state.current_message or failure_message(table.concat(output)),
+        path = translated,
+        line = tonumber(row) - 1,
+        column = tonumber(column) - 1,
+        severity = vim.diagnostic.severity.ERROR,
+      }
+      add_error(stream_results, result_id_for_error(tree, spec, parsed, positions), parsed)
+    end
+  end
+
+  local traceback_line = clean_line:match('^%s*File%s+"[^"]+",%s+line%s+(%d+),')
+  if traceback_line ~= nil then
+    state.vm_line = tonumber(traceback_line)
+  elseif state.vm_line ~= nil then
+    local message = clean_line:match("^%s*([%w_%.]+:%s*.*)$")
+      or clean_line:match("^%s*([%w_%.]+)%s*$")
+    if message ~= nil then
+      if target ~= nil then
+        local mapped_line = vm.test_script_line(target, state.vm_line)
+        if mapped_line ~= nil then
+          add_error(stream_results, target.id, {
+            message = message,
+            path = target.path,
+            line = mapped_line,
+            column = 0,
+            severity = vim.diagnostic.severity.ERROR,
+          })
+        end
+      end
+      state.vm_line = nil
+    end
+  end
+end
+
 ---@param spec neotest.RunSpec
 ---@param tree neotest.Tree
 ---@return fun(output_stream: fun(): string|string[]?): fun(): table<string, neotest.Result>?
@@ -993,54 +1137,101 @@ function M.stream(spec, tree)
       end
     end
 
-    local output = {}
-    local parsed_error_count = 0
-    local traceback_count = 0
+    ---@type neotest-nix.StreamInputState
+    local input = { pending = "", marker_pending = "", output = {}, finished = false }
     local positions = test_positions(tree)
     local target = vm_target(tree, spec)
     local is_nix_unit = spec.context ~= nil and spec.context.runner == "nix-unit"
+    local end_marker = spec.context ~= nil and spec.context.stream_end_marker or nil
+    local root = spec.cwd or uv.cwd() or "."
+    ---@type neotest-nix.GenericStreamState
+    local generic = {}
     ---@type table<string, { status: string, short: string? }>
     local streamed_nix_unit = {}
 
     return function()
+      if input.finished then
+        return nil
+      end
+
       while true do
         local chunk = output_stream()
         if chunk == nil then
-          return nil
-        end
-        if type(chunk) == "table" then
-          chunk = #chunk > 0 and (table.concat(chunk, "\n") .. "\n") or ""
-        end
-
-        if chunk ~= "" then
-          table.insert(output, chunk)
-          local text = table.concat(output)
-          local root = spec.cwd or uv.cwd() or "."
-
-          if is_nix_unit then
-            local stream_results = nix_unit_stream_results(text, positions, streamed_nix_unit)
-            if not vim.tbl_isempty(stream_results) then
-              return paths.translate_result_paths(stream_results, root)
-            end
-          else
-            local parsed_errors = M.parse_errors(text, root)
+          local lines = {}
+          if input.marker_pending ~= "" then
+            local trailing = input.marker_pending
+            input.marker_pending = ""
+            lines = consume_stream_chunk(input, trailing, nil)
+          end
+          if input.pending ~= "" and not is_nix_unit then
+            lines[#lines + 1] = input.pending
+            input.pending = ""
+          end
+          if #lines > 0 and not is_nix_unit then
             local stream_results = {}
-
-            for index = parsed_error_count + 1, #parsed_errors do
-              local parsed = parsed_errors[index]
-              add_error(stream_results, result_id_for_error(tree, spec, parsed, positions), parsed)
+            for _, line in ipairs(lines) do
+              parse_stream_line(
+                line,
+                generic,
+                stream_results,
+                tree,
+                spec,
+                positions,
+                target,
+                root,
+                input.output
+              )
             end
-            parsed_error_count = #parsed_errors
-
-            traceback_count = add_vm_tracebacks(stream_results, target, text, traceback_count + 1)
-
+            input.finished = true
             if not vim.tbl_isempty(stream_results) then
               for _, result in pairs(stream_results) do
-                result.short = text
+                result.short = table.concat(input.output)
               end
               return paths.translate_result_paths(stream_results, root)
             end
           end
+          input.finished = true
+          return nil
+        end
+
+        local lines, ended = consume_stream_chunk(input, chunk, end_marker)
+        if is_nix_unit then
+          local full_output = table.concat(input.output)
+          local stream_results = nix_unit_stream_results(full_output, positions, streamed_nix_unit)
+          if ended then
+            input.finished = true
+          end
+          if not vim.tbl_isempty(stream_results) then
+            return paths.translate_result_paths(stream_results, root)
+          end
+        else
+          local stream_results = {}
+          for _, line in ipairs(lines) do
+            parse_stream_line(
+              line,
+              generic,
+              stream_results,
+              tree,
+              spec,
+              positions,
+              target,
+              root,
+              input.output
+            )
+          end
+          if ended then
+            input.finished = true
+          end
+          if not vim.tbl_isempty(stream_results) then
+            for _, result in pairs(stream_results) do
+              result.short = table.concat(input.output)
+            end
+            return paths.translate_result_paths(stream_results, root)
+          end
+        end
+
+        if input.finished then
+          return nil
         end
       end
     end

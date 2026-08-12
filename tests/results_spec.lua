@@ -1,4 +1,6 @@
 local results = require("neotest-nix.results")
+local process = require("neotest-nix.process")
+local nio = require("nio")
 
 local active_store_root
 local original_fs_lstat
@@ -850,6 +852,195 @@ describe("results", function()
       column = 0,
       severity = vim.diagnostic.severity.ERROR,
     }, vm_result.errors[1])
+    assert.is_nil(stream())
+  end)
+
+  it("produces equivalent diagnostics across byte-sized chunks", function()
+    local root = project()
+    local position_tree = tree(root)
+    local output = table.concat({
+      "error: assertion failed",
+      "       at /nix/store/abc123-source/checks/unit.nix:2:3:",
+    }, "\n")
+
+    local function collect(chunks)
+      local index = 0
+      local stream = results.stream(run_spec(root), position_tree)(function()
+        index = index + 1
+        return chunks[index]
+      end)
+      local collected = {}
+      while true do
+        local parsed = stream()
+        if parsed == nil then
+          break
+        end
+        for id, result in pairs(parsed) do
+          collected[id] = result
+        end
+      end
+      return collected
+    end
+
+    local bytes = {}
+    for index = 1, #output do
+      bytes[index] = output:sub(index, index)
+    end
+    assert.are.same(collect({ output }), collect(bytes))
+  end)
+
+  it("streams each error with its latest message", function()
+    local root = project()
+    local position_tree = multi_test_tree(root)
+    local chunks = {
+      "error: first failed\n",
+      "       at /nix/store/abc123-source/checks/unit.nix:1:1:\n",
+      "error: second failed\n",
+      "       at /nix/store/abc123-source/checks/unit.nix:3:1:",
+    }
+    local index = 0
+    local stream = results.stream(run_spec(root), position_tree)(function()
+      index = index + 1
+      return chunks[index]
+    end)
+
+    local first = assert(stream())
+    local second = assert(stream())
+    local first_result = assert(first.first)
+    local second_result = assert(second.second)
+    assert.are.equal("first failed", first_result.errors[1].message)
+    assert.are.equal("second failed", second_result.errors[1].message)
+    assert.is_nil(stream())
+  end)
+
+  it("terminates when the process stream marker arrives", function()
+    local root = project()
+    local position_tree = tree(root)
+    local marker = "__private_stream_end__"
+    local consumed = 0
+    local stream = results.stream(run_spec(root, { stream_end_marker = marker }), position_tree)(
+      function()
+        consumed = consumed + 1
+        if consumed == 1 then
+          return {
+            "error: assertion failed",
+            "       at /nix/store/abc123-source/checks/unit.nix:2:3:",
+            marker,
+          }
+        end
+        error("stream read after end marker")
+      end
+    )
+
+    local parsed = assert(stream())
+    local unit = assert(parsed.unit)
+    assert.are.equal("failed", unit.status)
+    assert.is_nil(stream())
+    assert.are.equal(1, consumed)
+  end)
+
+  it("terminates when a raw process stream marker is split across chunks", function()
+    local root = project()
+    local position_tree = tree(root)
+    local marker = "__private_stream_end__"
+    local output = "error: assertion failed\n"
+      .. "       at /nix/store/abc123-source/checks/unit.nix:2:3:"
+      .. "\n"
+      .. marker
+      .. "\n"
+    local index = 0
+    local stream = results.stream(run_spec(root, { stream_end_marker = marker }), position_tree)(
+      function()
+        index = index + 1
+        if index <= #output then
+          return output:sub(index, index)
+        end
+        error("stream read after split end marker")
+      end
+    )
+
+    local parsed = assert(stream())
+    local unit = assert(parsed.unit)
+    assert.are.equal("failed", unit.status)
+    assert.is_nil(stream())
+    assert.are.equal(#output, index)
+  end)
+
+  it("terminates actual Neotest line-split process streams", function()
+    local done = false
+    local failed
+    local root = project()
+    local position_tree = tree(root)
+
+    nio.run(function()
+      local run = { command = { "sh", "-c", "printf progress" }, cwd = root }
+      local proc = process.strategy(run)
+      local line_stream = require("neotest.lib").files.split_lines(proc.output_stream())
+      local stream = results.stream(run, position_tree)(line_stream)
+      local streamed = stream()
+      local code = proc.result()
+
+      local ok, err = pcall(function()
+        assert.is_nil(streamed)
+        assert.are.equal(0, code)
+        assert.is_nil(stream())
+      end)
+      failed = not ok and err or nil
+    end, function(success, err)
+      if not success then
+        failed = err
+      end
+      done = true
+    end)
+
+    vim.wait(2000, function()
+      return done
+    end)
+    assert.is_nil(failed)
+    assert.is_true(done)
+  end)
+
+  it("streams VM tracebacks across byte-sized chunks", function()
+    local root = project()
+    local position_tree = vm_tree(root)
+    local output = table.concat({
+      "Traceback (most recent call last):",
+      '  File "/nix/store/hash-source/test-script.py", line 2, in <module>',
+      '    machine.succeed("false")',
+      "AssertionError: command failed",
+    }, "\n")
+    local index = 0
+    local stream = results.stream(run_spec(root), position_tree)(function()
+      index = index + 1
+      return index <= #output and output:sub(index, index) or nil
+    end)
+
+    local parsed = assert(stream())
+    local vm = assert(parsed.vm)
+    assert.are.equal("failed", vm.status)
+    assert.are.equal("AssertionError: command failed", vm.errors[1].message)
+    assert.is_nil(stream())
+  end)
+
+  it("streams ANSI-prefixed VM tracebacks", function()
+    local root = project()
+    local position_tree = vm_tree(root)
+    local chunks = {
+      "\27[31mTraceback (most recent call last):\27[0m\n",
+      '\27[31m  File "/nix/store/hash-source/test-script.py", line 2, in <module>\27[0m\n',
+      '\27[31m    machine.succeed("false")\27[0m\n',
+      "\27[31mAssertionError: command failed\27[0m",
+    }
+    local index = 0
+    local stream = results.stream(run_spec(root), position_tree)(function()
+      index = index + 1
+      return chunks[index]
+    end)
+
+    local parsed = assert(stream())
+    local vm_result = assert(parsed.vm)
+    assert.are.equal("failed", vm_result.status)
+    assert.are.equal("AssertionError: command failed", vm_result.errors[1].message)
     assert.is_nil(stream())
   end)
 end)

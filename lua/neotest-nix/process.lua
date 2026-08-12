@@ -2,6 +2,11 @@ local nio = require("nio")
 
 local M = {}
 
+---@return string
+local function stream_end_marker()
+  return ("__NEOTEST_NIX_STREAM_END_%d_%d__"):format(vim.uv.os_getpid(), vim.uv.hrtime())
+end
+
 ---@param message string
 ---@return neotest.Process
 local function completed_failure(message)
@@ -47,6 +52,7 @@ end
 function M.strategy(spec)
   spec.context = spec.context or {}
   spec.context.output_setup_error = nil
+  spec.context.stream_end_marker = nil
   local output_path = nio.fn.tempname()
   ---@type file*?
   local output_file, open_err = io.open(output_path, "w")
@@ -65,6 +71,8 @@ function M.strategy(spec)
   -- Unique end-of-stream marker; pushed after the final chunk so stream
   -- consumers never race process completion against a pending queue get.
   local output_sentinel = {}
+  local end_marker = stream_end_marker()
+  spec.context.stream_end_marker = end_marker
   local result_code
 
   -- Hold a single handle for the process lifetime; flush per chunk so the
@@ -129,9 +137,10 @@ function M.strategy(spec)
         local data = output_queue.get()
         if data == output_sentinel then
           finished = true
-          -- Re-queue the sentinel so any other stream iterator terminates too.
+          -- Neotest's line splitter does not forward raw iterator EOF. Emit a
+          -- private complete line so the adapter parser can terminate too.
           output_queue.put_nowait(output_sentinel)
-          return nil
+          return "\n" .. end_marker .. "\n"
         end
 
         return data

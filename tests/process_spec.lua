@@ -42,13 +42,14 @@ describe("process", function()
     local line_count = 200
 
     nio.run(function()
-      local proc = process.strategy({
+      local run = {
         command = {
           "sh",
           "-c",
           ("i=1; while [ $i -le %d ]; do echo line$i; i=$((i+1)); done"):format(line_count),
         },
-      })
+      }
+      local proc = process.strategy(run)
       local stream = proc.output_stream()
       local chunks = {}
       local chunk = stream()
@@ -66,6 +67,7 @@ describe("process", function()
           seen = seen + 1
         end
         assert.are.equal(line_count, seen)
+        assert.is_truthy(streamed:find(run.context.stream_end_marker, 1, true))
         assert.is_nil(stream())
         assert.is_true(proc.is_complete())
       end)
