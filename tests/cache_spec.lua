@@ -57,7 +57,7 @@ describe("cache", function()
       rawset(io, "open", original_io_open)
     end)
 
-    for index = 1, 40 do
+    for _ = 1, 40 do
       local path = vim.fn.tempname()
       table.insert(paths, path)
       write_file(path, source)

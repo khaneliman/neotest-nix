@@ -76,7 +76,8 @@ function M.materialize_fixture(fixture_name)
   local dir = vim.fn.tempname()
   vim.fn.mkdir(dir, "p")
 
-  local ok = command_succeeded(("cp -r %s/. %s/"):format(vim.fn.shellescape(src), vim.fn.shellescape(dir)))
+  local ok =
+    command_succeeded(("cp -r %s/. %s/"):format(vim.fn.shellescape(src), vim.fn.shellescape(dir)))
   assert(ok, ("neotest-nix integration: failed to copy fixture `%s`"):format(fixture_name))
 
   local init_cmd = ("cd %s && git init -q && git -c user.email=neotest-nix@example.com "):format(

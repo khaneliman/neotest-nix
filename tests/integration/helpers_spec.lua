@@ -16,15 +16,15 @@ describe("integration helpers", function()
   end)
 
   teardown(function()
-    os.execute = original_execute
+    rawset(os, "execute", original_execute)
     vim.fn.tempname = original_tempname
     vim.fn.delete(temp_dir, "rf")
   end)
 
   it("rejects a failed numeric os.execute status", function()
-    os.execute = function()
+    rawset(os, "execute", function()
       return 256
-    end
+    end)
 
     assert.has_error(function()
       helpers.materialize_fixture("integration-flake")
@@ -32,9 +32,9 @@ describe("integration helpers", function()
   end)
 
   it("accepts a successful numeric os.execute status", function()
-    os.execute = function()
+    rawset(os, "execute", function()
       return 0
-    end
+    end)
 
     local dir, cleanup = helpers.materialize_fixture("integration-flake")
     assert.are.equal(temp_dir, dir)
