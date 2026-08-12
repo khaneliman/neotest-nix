@@ -125,13 +125,15 @@ describe("process", function()
         return missing_path
       end
 
-      local ok, proc = pcall(process.strategy, {
+      local run = {
         command = { "sh", "-c", "exit 0" },
-      })
+      }
+      local ok, proc = pcall(process.strategy, run)
       nio.fn.tempname = original_tempname
 
       local stream = ok and proc.output_stream() or nil
       local message = stream and stream() or nil
+      local transported_message = run.context.output_setup_error
       local ok_assert, err = pcall(function()
         assert.is_true(ok)
         if not ok then
@@ -144,10 +146,55 @@ describe("process", function()
         assert.is_true(proc.is_complete())
         assert.is_truthy(message:find("failed to open output file", 1, true))
         assert.is_truthy(message:find(missing_path, 1, true))
-        assert.are.equal(message, proc.output())
+        assert.are.equal(message, transported_message)
+        assert.is_nil(proc.output())
         assert.is_nil(stream())
       end)
       failed = not ok_assert and err or nil
+      done = true
+    end)
+
+    vim.wait(1000, function()
+      return done
+    end)
+    assert.is_nil(failed)
+    assert.is_true(done)
+  end)
+
+  it("clears stale output setup errors before reuse", function()
+    local done = false
+    local failed
+    local output_path = vim.fn.tempname()
+    local original_tempname = nio.fn.tempname
+
+    nio.fn.tempname = function()
+      return output_path
+    end
+    finally(function()
+      nio.fn.tempname = original_tempname
+      vim.fn.delete(output_path)
+    end)
+
+    nio.run(function()
+      local run = {
+        command = { "sh", "-c", "exit 0" },
+        context = { output_setup_error = "stale" },
+      }
+      local proc = process.strategy(run)
+      local cleared = run.context.output_setup_error == nil
+      local code = proc.result()
+      local process_output = proc.output()
+
+      local ok, err = pcall(function()
+        assert.is_true(cleared)
+        assert.are.equal(0, code)
+        assert.are.equal(output_path, process_output)
+      end)
+      failed = not ok and err or nil
+    end, function(success, err)
+      if not success then
+        failed = err
+      end
       done = true
     end)
 

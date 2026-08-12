@@ -10,9 +10,7 @@ local function completed_failure(message)
     is_complete = function()
       return true
     end,
-    output = function()
-      return message
-    end,
+    output = function() end,
     output_stream = function()
       local sent = false
       return function()
@@ -47,13 +45,18 @@ end
 ---@param spec neotest.RunSpec
 ---@return neotest.Process
 function M.strategy(spec)
+  spec.context = spec.context or {}
+  spec.context.output_setup_error = nil
   local output_path = nio.fn.tempname()
   ---@type file*?
   local output_file, open_err = io.open(output_path, "w")
   if output_file == nil then
-    return completed_failure(
-      ("neotest-nix: failed to open output file `%s`: %s"):format(output_path, tostring(open_err))
+    local message = ("neotest-nix: failed to open output file `%s`: %s"):format(
+      output_path,
+      tostring(open_err)
     )
+    spec.context.output_setup_error = message
+    return completed_failure(message)
   end
 
   local finish = nio.control.future()

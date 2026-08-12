@@ -839,6 +839,21 @@ local function count_failed(results)
   return count
 end
 
+---@param tree neotest.Tree
+---@param message string
+---@return table<string, neotest.Result>
+local function output_setup_failure_results(tree, message)
+  local results = {}
+  for _, position in tree:iter() do
+    results[position.id] = {
+      status = "failed",
+      errors = {},
+    }
+  end
+  results[tree:data().id].short = message
+  return results
+end
+
 ---Enrich a failed build/flake-check result with `nix log` output for any
 ---failed derivation named in its own output. Bounded to the number of
 ---failed positions in this run, so a pathological `--keep-going` run with
@@ -870,18 +885,23 @@ end
 ---@return table<string, neotest.Result>
 function M.results(spec, result, tree)
   local root = spec.cwd or uv.cwd() or "."
+  local context = spec.context or {}
+  if context.output_setup_error ~= nil then
+    return output_setup_failure_results(tree, context.output_setup_error)
+  end
+
   local output = read_file(result.output) or ""
   output = paths.translate_string(output, root)
 
-  if spec.context ~= nil and spec.context.runner == "nix-unit" then
+  if context.runner == "nix-unit" then
     return nix_unit_results(tree, output, result.code, root, spec)
   end
 
-  if spec.context ~= nil and spec.context.runner == "nix-eval" then
+  if context.runner == "nix-eval" then
     return nix_eval_results(tree, output, result.code)
   end
 
-  if spec.context ~= nil and spec.context.runner == "namaka" then
+  if context.runner == "namaka" then
     return namaka_results(tree, output, result.code)
   end
 
@@ -911,7 +931,6 @@ function M.results(spec, result, tree)
     }
   end
 
-  local context = spec.context or {}
   local nix_bin = context.nix_bin or "nix"
   local enrichment = build_drv_enrichment(output, root, results, nix_bin)
   if enrichment ~= nil then
@@ -965,9 +984,15 @@ end
 
 ---@param spec neotest.RunSpec
 ---@param tree neotest.Tree
----@return fun(output_stream: fun(): string?): fun(): table<string, neotest.Result>?
+---@return fun(output_stream: fun(): string|string[]?): fun(): table<string, neotest.Result>?
 function M.stream(spec, tree)
   return function(output_stream)
+    if spec.context ~= nil and spec.context.output_setup_error ~= nil then
+      return function()
+        return nil
+      end
+    end
+
     local output = {}
     local parsed_error_count = 0
     local traceback_count = 0
@@ -983,33 +1008,38 @@ function M.stream(spec, tree)
         if chunk == nil then
           return nil
         end
+        if type(chunk) == "table" then
+          chunk = #chunk > 0 and (table.concat(chunk, "\n") .. "\n") or ""
+        end
 
-        table.insert(output, chunk)
-        local text = table.concat(output)
-        local root = spec.cwd or uv.cwd() or "."
+        if chunk ~= "" then
+          table.insert(output, chunk)
+          local text = table.concat(output)
+          local root = spec.cwd or uv.cwd() or "."
 
-        if is_nix_unit then
-          local stream_results = nix_unit_stream_results(text, positions, streamed_nix_unit)
-          if not vim.tbl_isempty(stream_results) then
-            return paths.translate_result_paths(stream_results, root)
-          end
-        else
-          local parsed_errors = M.parse_errors(text, root)
-          local stream_results = {}
-
-          for index = parsed_error_count + 1, #parsed_errors do
-            local parsed = parsed_errors[index]
-            add_error(stream_results, result_id_for_error(tree, spec, parsed, positions), parsed)
-          end
-          parsed_error_count = #parsed_errors
-
-          traceback_count = add_vm_tracebacks(stream_results, target, text, traceback_count + 1)
-
-          if not vim.tbl_isempty(stream_results) then
-            for _, result in pairs(stream_results) do
-              result.short = text
+          if is_nix_unit then
+            local stream_results = nix_unit_stream_results(text, positions, streamed_nix_unit)
+            if not vim.tbl_isempty(stream_results) then
+              return paths.translate_result_paths(stream_results, root)
             end
-            return paths.translate_result_paths(stream_results, root)
+          else
+            local parsed_errors = M.parse_errors(text, root)
+            local stream_results = {}
+
+            for index = parsed_error_count + 1, #parsed_errors do
+              local parsed = parsed_errors[index]
+              add_error(stream_results, result_id_for_error(tree, spec, parsed, positions), parsed)
+            end
+            parsed_error_count = #parsed_errors
+
+            traceback_count = add_vm_tracebacks(stream_results, target, text, traceback_count + 1)
+
+            if not vim.tbl_isempty(stream_results) then
+              for _, result in pairs(stream_results) do
+                result.short = text
+              end
+              return paths.translate_result_paths(stream_results, root)
+            end
           end
         end
       end

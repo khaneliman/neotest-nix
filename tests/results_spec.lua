@@ -550,6 +550,26 @@ describe("results", function()
     assert.are.equal("Nix command failed", parsed[position_tree:data().id].short)
   end)
 
+  it("preserves output setup failures from the run context", function()
+    local root = project()
+    local position_tree = multi_test_tree(root)
+    local message = "neotest-nix: failed to open output file: injected failure"
+    local parsed = results.results(
+      run_spec(root, { runner = "namaka", output_setup_error = message }),
+      ---@diagnostic disable-next-line: missing-fields
+      { code = 1 },
+      position_tree
+    )
+
+    assert.are.equal("failed", parsed[position_tree:data().id].status)
+    assert.are.equal(message, parsed[position_tree:data().id].short)
+    assert.is_nil(parsed[position_tree:data().id].output)
+    assert.are.equal("failed", parsed.first.status)
+    assert.are.equal("failed", parsed.second.status)
+    assert.is_nil(parsed.first.output)
+    assert.is_nil(parsed.second.output)
+  end)
+
   it("skips whitespace-only error lines when choosing a message", function()
     local root = project()
     local position_tree = tree(root)
@@ -718,6 +738,52 @@ describe("results", function()
       severity = vim.diagnostic.severity.ERROR,
     }, unit.errors[1])
     assert.is_nil(stream())
+  end)
+
+  it("streams Neotest line batches", function()
+    local root = project()
+    local position_tree = tree(root)
+    local chunks = {
+      {},
+      {
+        "error: assertion failed",
+        "       at /nix/store/abc123-source/checks/unit.nix:2:3:",
+      },
+    }
+    local index = 0
+    local stream = results.stream(run_spec(root), position_tree)(function()
+      index = index + 1
+      return chunks[index]
+    end)
+
+    local parsed = stream()
+
+    if parsed == nil or parsed.unit == nil or parsed.unit.errors == nil then
+      error("missing streamed unit result")
+    end
+    assert.are.equal("failed", parsed.unit.status)
+    assert.are.equal("assertion failed", parsed.unit.errors[1].message)
+    assert.are.equal(
+      ("error: assertion failed\n       at %s/checks/unit.nix:2:3:\n"):format(root),
+      parsed.unit.short
+    )
+    assert.is_nil(stream())
+  end)
+
+  it("does not consume streams after output setup failure", function()
+    local root = project()
+    local position_tree = tree(root)
+    local consumed = false
+    local stream = results.stream(
+      run_spec(root, { output_setup_error = "failed before spawn" }),
+      position_tree
+    )(function()
+      consumed = true
+      return { "unexpected" }
+    end)
+
+    assert.is_nil(stream())
+    assert.is_false(consumed)
   end)
 
   it("streams VM traceback diagnostics as soon as tracebacks are available", function()
