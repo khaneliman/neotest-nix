@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.3.1](https://github.com/khaneliman/neotest-nix/compare/v2.3.0...v2.3.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **config:** reject malformed patterns ([13d98f6](https://github.com/khaneliman/neotest-nix/commit/13d98f6b7e539680f872bc75c091f53d9b8481ca))
+* **discovery:** bound source cache ([72a49e2](https://github.com/khaneliman/neotest-nix/commit/72a49e2913af032b07e6008bd06810c497e00205))
+* **discovery:** strengthen cache keys ([8216b7a](https://github.com/khaneliman/neotest-nix/commit/8216b7a9fe89eea43a0ff4d44b6c8bdc065734d4))
+* **discovery:** support gitfile roots ([fee56a1](https://github.com/khaneliman/neotest-nix/commit/fee56a11ecc7cd4f2e4c068942fcd3c7510d6fd2))
+* **paths:** verify translated content ([a8e1974](https://github.com/khaneliman/neotest-nix/commit/a8e1974e8cf5694f519031924b99fe0e3a6e55e0))
+* **process:** preserve setup failures ([79790b1](https://github.com/khaneliman/neotest-nix/commit/79790b1c3ff70e023be7667820b9db23c681506a))
+* **tooling:** scope field diagnostics ([6451689](https://github.com/khaneliman/neotest-nix/commit/6451689128a474fb16dd955fdeea79e558011eae))
+* **vm:** bound traceback diagnostics ([5104084](https://github.com/khaneliman/neotest-nix/commit/5104084a324deac50a22653241a90453ad95fe71))
+
+
+### Performance Improvements
+
+* **discovery:** reuse classification source ([e3c8131](https://github.com/khaneliman/neotest-nix/commit/e3c81314e697c30c5daa95d17ccaadac021db2db))
+* **results:** bound stream updates ([3151dae](https://github.com/khaneliman/neotest-nix/commit/3151daeb34b2cef1d56e22a19a3a18887ac18e12))
+* **results:** parse diagnostics incrementally ([edd8f22](https://github.com/khaneliman/neotest-nix/commit/edd8f22cdcb30a1a43da73a34cb08b34dbc0fb66))
+* **results:** parse nix-unit incrementally ([57a256e](https://github.com/khaneliman/neotest-nix/commit/57a256ea8fbf56cb084e2998abdcc58d7328685d))
+
 ## [2.3.0](https://github.com/khaneliman/neotest-nix/compare/v2.2.0...v2.3.0) (2026-07-08)
 
 
