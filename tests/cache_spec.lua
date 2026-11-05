@@ -69,7 +69,7 @@ describe("cache", function()
     assert.are.equal(2, reads[first_path])
   end)
 
-  it("does not retain an oversized source body", function()
+  it("rejects an oversized source before opening it", function()
     local path = vim.fn.tempname()
     table.insert(paths, path)
     local source = string.rep("x", 512 * 1024 + 1)
@@ -87,9 +87,84 @@ describe("cache", function()
       rawset(io, "open", original_io_open)
     end)
 
-    assert.are.equal(source, cache.read_source(path))
-    collectgarbage("collect")
-    assert.are.equal(source, cache.read_source(path))
-    assert.are.equal(2, reads)
+    local content, reason = cache.read_source(path)
+    assert.is_nil(content and #content)
+    assert.are.equal("too_large", reason)
+    assert.is_nil(cache.read_source(path))
+    assert.are.equal(0, reads)
+  end)
+
+  it("accepts empty sources and the exact source-size limit", function()
+    for _, size in ipairs({ 0, 512 * 1024 - 1, 512 * 1024 }) do
+      local path = vim.fn.tempname()
+      table.insert(paths, path)
+      local source = string.rep("x", size)
+      write_file(path, source)
+      assert.are.equal(source, cache.read_source(path))
+      assert.are.equal(source, cache.read_source(path))
+    end
+  end)
+
+  it("bounds reads and rejects a file that grows after stat", function()
+    local path = vim.fn.tempname()
+    table.insert(paths, path)
+    write_file(path, "small")
+
+    local original_io_open = io.open
+    local closed = false
+    rawset(io, "open", function(file_path, mode)
+      if file_path ~= path or mode ~= "r" then
+        return original_io_open(file_path, mode)
+      end
+      write_file(path, string.rep("x", 512 * 1024 + 100))
+      local file = assert(original_io_open(file_path, mode))
+      return {
+        read = function(_, count)
+          assert.are.equal(512 * 1024 + 1, count)
+          return file:read(count)
+        end,
+        close = function()
+          closed = true
+          return file:close()
+        end,
+      }
+    end)
+    finally(function()
+      rawset(io, "open", original_io_open)
+    end)
+
+    local content, reason = cache.read_source(path)
+    assert.is_nil(content and #content)
+    assert.are.equal("too_large", reason)
+    assert.is_true(closed)
+  end)
+
+  it("does not turn a read error into an empty cached source", function()
+    local path = vim.fn.tempname()
+    table.insert(paths, path)
+    write_file(path, "small")
+    local original_io_open = io.open
+    local closed = false
+    rawset(io, "open", function(file_path, mode)
+      if file_path == path and mode == "r" then
+        return {
+          read = function()
+            return nil, "read failed"
+          end,
+          close = function()
+            closed = true
+          end,
+        }
+      end
+      return original_io_open(file_path, mode)
+    end)
+    finally(function()
+      rawset(io, "open", original_io_open)
+    end)
+
+    assert.is_nil(cache.read_source(path))
+    assert.is_true(closed)
+    rawset(io, "open", original_io_open)
+    assert.are.equal("small", cache.read_source(path))
   end)
 end)
