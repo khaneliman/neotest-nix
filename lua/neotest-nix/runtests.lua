@@ -64,9 +64,13 @@ end
 ---treat it as raw source already. Lets `is_runtests_file` accept either a
 ---path or in-memory content, which keeps unit tests free of temp files.
 ---@param value string
----@return string
+---@return string?
 local function read_as_content(value)
-  return cache.read_source(value) or value
+  local content, reason = cache.read_source(value)
+  if reason == "too_large" then
+    return nil
+  end
+  return content or value
 end
 
 ---Whether stripped Nix source contains a bare `runTests` call (`runTests
@@ -87,7 +91,8 @@ function M.is_runtests_file(content_or_path)
   if type(content_or_path) ~= "string" then
     return false
   end
-  return source_has_run_tests(read_as_content(content_or_path))
+  local content = read_as_content(content_or_path)
+  return content ~= nil and source_has_run_tests(content)
 end
 
 ---Whether the stripped source's top-level expression is a function over a

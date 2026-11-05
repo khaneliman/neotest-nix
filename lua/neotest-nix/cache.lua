@@ -10,7 +10,8 @@ local source_cache_bytes = 0
 
 local MAX_SOURCE_CACHE_ENTRIES = 32
 local MAX_SOURCE_CACHE_BYTES = 2 * 1024 * 1024
-local MAX_SOURCE_CACHE_ENTRY_BYTES = 512 * 1024
+-- Bounds transient reads and scanner work as well as each retained cache entry.
+local MAX_SOURCE_BYTES = 512 * 1024
 
 local function detach(entry)
   if entry.previous ~= nil then
@@ -74,15 +75,24 @@ function M.fingerprint(stat)
 end
 
 ---@param file_path string
+---@param stat table? Metadata snapshot used by the caller's classification cache.
 ---@return string?
-function M.read_source(file_path)
-  local stat = uv.fs_stat(file_path)
+---@return "too_large"? reason
+function M.read_source(file_path, stat)
+  stat = stat or uv.fs_stat(file_path)
   if stat == nil or stat.type ~= "file" then
     return nil
   end
 
-  local fingerprint = M.fingerprint(stat)
   local cached = source_cache[file_path]
+  if stat.size > MAX_SOURCE_BYTES then
+    if cached ~= nil then
+      remove(cached)
+    end
+    return nil, "too_large"
+  end
+
+  local fingerprint = M.fingerprint(stat)
   if cached ~= nil and cached.fingerprint == fingerprint then
     promote(cached)
     return cached.content
@@ -92,30 +102,35 @@ function M.read_source(file_path)
   if file == nil then
     return nil
   end
-  local content = file:read("*a")
+  -- One extra byte detects growth after stat without accepting a truncated
+  -- source. A numeric read returns nil at empty-file EOF, unlike `*a`.
+  local content, err = file:read(MAX_SOURCE_BYTES + 1)
   file:close()
-  if content == nil then
+  if err ~= nil then
     return nil
   end
-
-  if #content <= MAX_SOURCE_CACHE_ENTRY_BYTES then
+  content = content or ""
+  if #content > MAX_SOURCE_BYTES then
     if cached ~= nil then
       remove(cached)
     end
+    return nil, "too_large"
+  end
 
-    local entry = {
-      file_path = file_path,
-      fingerprint = fingerprint,
-      content = content,
-    }
-    source_cache[file_path] = entry
-    prepend(entry)
-    source_cache_entries = source_cache_entries + 1
-    source_cache_bytes = source_cache_bytes + #content
-    evict_until_bounded()
-  elseif cached ~= nil then
+  if cached ~= nil then
     remove(cached)
   end
+
+  local entry = {
+    file_path = file_path,
+    fingerprint = fingerprint,
+    content = content,
+  }
+  source_cache[file_path] = entry
+  prepend(entry)
+  source_cache_entries = source_cache_entries + 1
+  source_cache_bytes = source_cache_bytes + #content
+  evict_until_bounded()
   return content
 end
 
