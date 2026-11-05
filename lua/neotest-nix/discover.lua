@@ -462,12 +462,8 @@ local function has_passthru_tests(file_path)
     return cached.result
   end
 
-  local file = io.open(file_path, "r")
-  if file == nil then
-    return false
-  end
-  local content = file:read("*a")
-  file:close()
+  -- Keep read admission and the cached result on the same metadata snapshot.
+  local content = cache.read_source(file_path, stat)
   if content == nil then
     return false
   end

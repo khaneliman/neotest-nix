@@ -259,6 +259,10 @@ output path.
 
 ## Limitations
 
+- Source-based nix-unit, `lib.runTests`, and Nixpkgs by-name classification
+  skip files larger than 512 KiB to bound editor memory and scanner work.
+  The shared reader also applies this limit when building `lib.runTests` run
+  commands. Files that grow past the limit during a read are skipped entirely.
 - Raw non-flake NixOS VM test files are not supported. Standalone
   `testers.runNixOSTest` discovery applies to flake outputs and runs
   `nix build .#<attr>`.

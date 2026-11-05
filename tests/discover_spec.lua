@@ -402,6 +402,115 @@ describe("discover", function()
     assert.is_false(discover.is_test_file(plain))
   end)
 
+  it("skips oversized nix-unit and runTests sources without reading them", function()
+    local tests = vim.fs.joinpath(tmp, "tests", "runTests")
+    mkdir(tests)
+    local paths = {
+      vim.fs.joinpath(tests, "unit_test.nix"),
+      vim.fs.joinpath(tests, "helper_test.nix"),
+    }
+    local sources = {
+      "{ testFoo = { expr = 1; expected = 1; }; }",
+      "lib.runTests (mkCases [ 1 2 3 ])",
+    }
+    for i, path in ipairs(paths) do
+      write_file(path, { sources[i] .. string.rep(" ", 512 * 1024) })
+    end
+
+    local original_io_open = io.open
+    rawset(io, "open", function(path, mode)
+      assert.is_false(mode == "r" and vim.tbl_contains(paths, path))
+      return original_io_open(path, mode)
+    end)
+    finally(function()
+      rawset(io, "open", original_io_open)
+      discover.clear_cache()
+    end)
+
+    for _, path in ipairs(paths) do
+      assert.is_false(discover.is_test_file(path))
+      assert.is_nil(discover.root(path))
+      assert.is_false(require("neotest-nix.runtests").is_runtests_file(path))
+    end
+  end)
+
+  it("accepts nix-unit source at the limit without truncating its assertion", function()
+    local path = vim.fs.joinpath(tmp, "boundary_test.nix")
+    local assertion = "{ testFoo = { expr = 1; expected = 1; }; }"
+    vim.fn.writefile({ string.rep(" ", 512 * 1024 - #assertion) .. assertion }, path, "b")
+    assert.is_true(discover.is_test_file(path))
+  end)
+
+  it("skips oversized by-name sources and discovers them after shrinking", function()
+    mkdir(vim.fs.joinpath(tmp, "lib"))
+    mkdir(vim.fs.joinpath(tmp, "nixos"))
+    local pkg_dir = vim.fs.joinpath(tmp, "pkgs", "by-name", "he", "hello")
+    mkdir(pkg_dir)
+    local path = vim.fs.joinpath(pkg_dir, "package.nix")
+    local source = "{ passthru.tests.x = { }; }"
+    write_file(path, { source })
+    assert.is_true(discover.is_test_file(path))
+
+    write_file(path, { source .. string.rep(" ", 512 * 1024) })
+    local original_io_open = io.open
+    rawset(io, "open", function(file_path, mode)
+      assert.is_false(file_path == path and mode == "r")
+      return original_io_open(file_path, mode)
+    end)
+    finally(function()
+      rawset(io, "open", original_io_open)
+      discover.clear_cache()
+    end)
+    assert.is_false(discover.is_test_file(path))
+    assert.is_false(discover.is_test_file(path))
+
+    rawset(io, "open", original_io_open)
+    vim.fn.writefile({ string.rep(" ", 512 * 1024 - #source) .. source }, path, "b")
+    assert.is_true(discover.is_test_file(path))
+  end)
+
+  it("does not cache a small symlink target under an oversized fingerprint", function()
+    mkdir(vim.fs.joinpath(tmp, "lib"))
+    mkdir(vim.fs.joinpath(tmp, "nixos"))
+    local pkg_dir = vim.fs.joinpath(tmp, "pkgs", "by-name", "he", "hello")
+    mkdir(pkg_dir)
+    local path = vim.fs.joinpath(pkg_dir, "package.nix")
+    local small = vim.fs.joinpath(tmp, "small.nix")
+    local large = vim.fs.joinpath(tmp, "large.nix")
+    local source = "{ passthru.tests.x = { }; }"
+    write_file(small, { source })
+    write_file(large, { source .. string.rep(" ", 512 * 1024) })
+    local linked, err = vim.uv.fs_symlink(large, path)
+    if linked == nil then
+      ---@diagnostic disable-next-line: missing-parameter
+      pending("symlink fixture unavailable: " .. tostring(err))
+    end
+
+    local cache = require("neotest-nix.cache")
+    local original_fingerprint = cache.fingerprint
+    local switched = false
+    cache.fingerprint = function(stat)
+      -- Swap targets after the classification stat, before the source read.
+      if not switched and stat.size > 512 * 1024 then
+        switched = true
+        assert(vim.uv.fs_unlink(path))
+        assert(vim.uv.fs_symlink(small, path))
+      end
+      return original_fingerprint(stat)
+    end
+    finally(function()
+      cache.fingerprint = original_fingerprint
+      discover.clear_cache()
+    end)
+
+    assert.is_false(discover.is_test_file(path))
+    assert.is_true(switched)
+    assert(vim.uv.fs_unlink(path))
+    assert(vim.uv.fs_symlink(large, path))
+    assert.is_false(discover.is_test_file(path))
+    assert.is_false(discover.is_test_file(path))
+  end)
+
   it("invalidates passthru cache when nanoseconds or size change", function()
     vim.fn.mkdir(vim.fs.joinpath(tmp, "lib"), "p")
     vim.fn.mkdir(vim.fs.joinpath(tmp, "nixos"), "p")
