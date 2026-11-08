@@ -59,6 +59,11 @@ jobs:
   integration-tests:
     name: real-nix integration specs (x86_64-linux)
     runs-on: ubuntu-latest
+    # The specs normally finish in about a minute. Neotest talks to its child
+    # Neovim over blocking RPC, so a stuck child can freeze the test process
+    # where no in-spec `vim.wait` timeout fires; this was seen intermittently
+    # in process_failure_integration_spec.lua and otherwise runs for 6 hours.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
